@@ -15,6 +15,7 @@ import {
 import { api, dashboardEmbedPath, getToken, type StorageSample } from '../api';
 import { StatusBadge } from '../components/StatusBadge';
 import { ConnectionPanel } from '../components/ConnectionPanel';
+import { EndpointsPanel } from '../components/EndpointsPanel';
 
 // Fixed colour + order for the storage breakdown so the legend is stable.
 const STORAGE_SERIES: { suffix: string; colour: string }[] = [
@@ -113,6 +114,8 @@ export function InstanceDetailPage() {
           <p className="text-sm text-red-400 mt-2">Last error: {instance.lastError}</p>
         )}
       </div>
+
+      <EndpointsPanel cloudUrl={instance.cloudUrl} siteUrl={instance.siteUrl} />
 
       <ConnectionPanel cloudUrl={instance.cloudUrl} adminKey={instance.adminKey} />
 

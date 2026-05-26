@@ -5,6 +5,7 @@ export interface InstanceListItem {
   cloudHost: string;
   siteHost: string;
   cloudUrl: string;
+  siteUrl: string;
   cloudPort: number;
   sitePort: number;
   adminKey: string;
