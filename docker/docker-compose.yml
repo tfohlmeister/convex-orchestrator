@@ -24,9 +24,15 @@ services:
       TRAEFIK_DYNAMIC_PATH: /etc/traefik/dynamic/orchestrator.yml
       TRAEFIK_CERT_RESOLVER: letsencrypt
       TRAEFIK_SERVICE_LOOPBACK: orchestrator
-      # Backends must accept connections from the bridge network so the
-      # Traefik container can reach them; 127.0.0.1 inside this container
-      # is invisible from outside the container's network namespace.
+      # Each supervised convex-backend listens on 0.0.0.0 so Traefik (a
+      # separate container on the same docker bridge network) can reach
+      # it via `orchestrator:<port>`. This is NOT exposed to the host:
+      # the orchestrator service has no `ports:` mapping, so the only
+      # things that can hit these ports are sibling containers on the
+      # same compose network (traefik, postgres, minio). External
+      # traffic always comes in through Traefik's host-routed 80/443.
+      # For a bare-metal single-process layout (no docker), leave
+      # CONVEX_BIND_ADDRESS unset and it falls back to 127.0.0.1.
       CONVEX_BIND_ADDRESS: 0.0.0.0
       LOG_LEVEL: info
     volumes:
