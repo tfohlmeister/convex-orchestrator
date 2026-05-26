@@ -97,6 +97,38 @@ export class MinioStorage {
   config(): MinioConfig {
     return this.cfg;
   }
+
+  // Walk all objects in a single bucket and sum their Size + count. Stops
+  // after `pageLimit` pages of `MaxKeys` (default 1000) — the caller marks
+  // the resulting sample `partial=true` if it hits the cap.
+  async measureBucket(
+    bucket: string,
+    pageLimit: number,
+  ): Promise<{ sizeBytes: number; objectCount: number; partial: boolean }> {
+    let sizeBytes = 0;
+    let objectCount = 0;
+    let continuationToken: string | undefined;
+    let pages = 0;
+    while (pages < pageLimit) {
+      const res = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000,
+        }),
+      );
+      for (const obj of res.Contents ?? []) {
+        sizeBytes += obj.Size ?? 0;
+        objectCount += 1;
+      }
+      pages += 1;
+      if (!res.IsTruncated) {
+        return { sizeBytes, objectCount, partial: false };
+      }
+      continuationToken = res.NextContinuationToken;
+    }
+    return { sizeBytes, objectCount, partial: true };
+  }
 }
 
 function isAlreadyExists(err: unknown): boolean {

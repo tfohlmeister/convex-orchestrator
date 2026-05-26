@@ -39,6 +39,8 @@ export function InstancesPage() {
               <th className="text-left px-4 py-2">Name</th>
               <th className="text-left px-4 py-2">Status</th>
               <th className="text-left px-4 py-2">RSS</th>
+              <th className="text-left px-4 py-2">CPU</th>
+              <th className="text-left px-4 py-2">FD</th>
               <th className="text-left px-4 py-2">Trend (24h)</th>
               <th className="text-left px-4 py-2">Host</th>
               <th className="text-right px-4 py-2">Actions</th>
@@ -50,7 +52,7 @@ export function InstancesPage() {
             ))}
             {query.data.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                   No instances yet. Click <em>New instance</em> to create one.
                 </td>
               </tr>
@@ -81,8 +83,11 @@ function Row({ instance, onDelete }: { instance: InstanceListItem; onDelete: () 
     queryFn: () => api.getInstance(instance.name),
     refetchInterval: 10_000,
   });
-  const sparkValues = detail.data?.samples.map((s) => s.rssKb) ?? [];
+  const rssSparkValues = detail.data?.samples.map((s) => s.rssKb) ?? [];
+  const fdSparkValues = (detail.data?.samples ?? []).slice(-48).map((s) => s.fdCount);
+  const latestFd = detail.data?.samples.at(-1)?.fdCount ?? null;
   const rssMb = instance.latestSample ? (instance.latestSample.rssKb / 1024).toFixed(1) : '—';
+  const cpu = instance.latestCpuCores != null ? instance.latestCpuCores.toFixed(2) : '—';
 
   return (
     <tr className="hover:bg-slate-900/60">
@@ -95,8 +100,12 @@ function Row({ instance, onDelete }: { instance: InstanceListItem; onDelete: () 
         <StatusBadge status={instance.status} />
       </td>
       <td className="px-4 py-3 text-sm">{rssMb} MB</td>
+      <td className="px-4 py-3 text-sm font-mono">{cpu}</td>
+      <td className="px-4 py-3" title={latestFd != null ? `${latestFd} open fds` : ''}>
+        <Sparkline values={fdSparkValues} />
+      </td>
       <td className="px-4 py-3">
-        <Sparkline values={sparkValues} />
+        <Sparkline values={rssSparkValues} />
       </td>
       <td className="px-4 py-3 text-xs text-slate-400">{instance.cloudHost}</td>
       <td className="px-4 py-3 text-right text-sm">

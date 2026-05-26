@@ -12,6 +12,8 @@ export interface InstanceListItem {
   updatedAt: number;
   lastError: string | null;
   latestSample: ResourceSample | null;
+  latestCpuCores: number | null;
+  latestStorageBytes: number | null;
 }
 
 export function dashboardEmbedPath(instanceName: string): string {
@@ -26,12 +28,31 @@ export interface ResourceSample {
   fdCount: number;
 }
 
+export interface SampleWithCpu {
+  takenAt: number;
+  rssKb: number;
+  fdCount: number;
+  cpuCores: number | null;
+}
+
+export interface StorageSample {
+  instanceName: string;
+  takenAt: number;
+  bucketSuffix: string;
+  sizeBytes: number;
+  objectCount: number;
+  partial: boolean;
+}
+
 export interface InstanceDetail {
   instance: Omit<InstanceListItem, 'latestSample'> & {
     adminKey: string;
     cloudUrl: string;
+    latestCpuCores: number | null;
+    latestStorageBytes: number | null;
   };
-  samples: ResourceSample[];
+  samples: SampleWithCpu[];
+  storageSamples: StorageSample[];
   audit: AuditEntry[];
 }
 

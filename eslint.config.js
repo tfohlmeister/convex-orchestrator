@@ -13,6 +13,7 @@ export default tseslint.config(
       'openspec/**',
       'eslint.config.js',
       'src/web/vite.config.ts',
+      '.remember/**',
     ],
   },
   js.configs.recommended,

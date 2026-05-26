@@ -4,7 +4,9 @@ import { open, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Orchestrator } from '../orchestrator.ts';
 import type { Config } from '../config.ts';
-import type { AuditRepo, ResourceSampleRepo } from '../db/repos.ts';
+import type { AuditRepo, ResourceSampleRepo, StorageSampleRepo } from '../db/repos.ts';
+import type { ResourceSample } from '../supervisor/types.ts';
+import { getClkTck } from '../system.ts';
 import { OrchestratorError, errorResponse } from './errors.ts';
 import {
   CreateInstanceSchema,
@@ -13,10 +15,46 @@ import {
   LogsQuerySchema,
 } from './schemas.ts';
 
+export interface SampleWithCpu {
+  takenAt: number;
+  rssKb: number;
+  fdCount: number;
+  cpuCores: number | null;
+}
+
+// Maps a sorted-by-takenAt sample series to a same-length series enriched
+// with `cpuCores`, the delta of `cpu_ticks` between consecutive rows
+// divided by elapsed wall-clock seconds and CLK_TCK. The first row and any
+// pair where `Δticks < 0` (backend restart reset the counter) get null,
+// rendered as a gap by the UI chart.
+export function deriveCpuCores(samples: ResourceSample[], clkTck: number): SampleWithCpu[] {
+  const out: SampleWithCpu[] = [];
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i]!;
+    let cpuCores: number | null = null;
+    if (i > 0) {
+      const prev = samples[i - 1]!;
+      const dTicks = s.cpuTicks - prev.cpuTicks;
+      const dSeconds = (s.takenAt - prev.takenAt) / 1000;
+      if (dTicks >= 0 && dSeconds > 0) {
+        cpuCores = dTicks / (dSeconds * clkTck);
+      }
+    }
+    out.push({
+      takenAt: s.takenAt,
+      rssKb: s.rssKb,
+      fdCount: s.fdCount,
+      cpuCores,
+    });
+  }
+  return out;
+}
+
 export interface RouteDeps {
   orchestrator: Orchestrator;
   config: Config;
   samples: ResourceSampleRepo;
+  storage: StorageSampleRepo;
   audit: AuditRepo;
   ready: () => boolean;
 }
@@ -32,23 +70,34 @@ export function buildRoutes(deps: RouteDeps): Hono {
 
   app.get('/api/deployments', requireBearer, (c) => c.json(deps.orchestrator.deployments()));
 
+  const clkTck = getClkTck();
+
   app.get('/api/instances', requireBearer, (c) => {
     const list = deps.orchestrator.list();
-    const enriched = list.map((i) => ({
-      name: i.name,
-      status: i.status,
-      baseDomain: i.baseDomain,
-      cloudHost: `${i.name}.${i.baseDomain}`,
-      siteHost: `${i.name}-site.${i.baseDomain}`,
-      cloudUrl: `${deps.config.EXTERNAL_SCHEME}://${i.name}.${i.baseDomain}${deps.config.EXTERNAL_PORT_SUFFIX}`,
-      cloudPort: i.cloudPort,
-      sitePort: i.sitePort,
-      adminKey: i.adminKey,
-      createdAt: i.createdAt,
-      updatedAt: i.updatedAt,
-      lastError: i.lastError ?? null,
-      latestSample: deps.samples.latestFor(i.name),
-    }));
+    const enriched = list.map((i) => {
+      const pair = deps.samples.latestPair(i.name);
+      const latestCpuCores = pair.length === 2 ? deriveCpuCores(pair, clkTck)[1]!.cpuCores : null;
+      const buckets = deps.storage.latestPerBucketFor(i.name);
+      const latestStorageBytes =
+        buckets.length > 0 ? buckets.reduce((acc, b) => acc + b.sizeBytes, 0) : null;
+      return {
+        name: i.name,
+        status: i.status,
+        baseDomain: i.baseDomain,
+        cloudHost: `${i.name}.${i.baseDomain}`,
+        siteHost: `${i.name}-site.${i.baseDomain}`,
+        cloudUrl: `${deps.config.EXTERNAL_SCHEME}://${i.name}.${i.baseDomain}${deps.config.EXTERNAL_PORT_SUFFIX}`,
+        cloudPort: i.cloudPort,
+        sitePort: i.sitePort,
+        adminKey: i.adminKey,
+        createdAt: i.createdAt,
+        updatedAt: i.updatedAt,
+        lastError: i.lastError ?? null,
+        latestSample: deps.samples.latestFor(i.name),
+        latestCpuCores,
+        latestStorageBytes,
+      };
+    });
     return c.json({ instances: enriched });
   });
 
@@ -56,7 +105,15 @@ export function buildRoutes(deps: RouteDeps): Hono {
     try {
       const name = InstanceNameSchema.parse(c.req.param('name'));
       const inst = deps.orchestrator.get(name);
-      const samples = deps.samples.recentFor(name, Date.now() - 24 * 60 * 60_000);
+      const since = Date.now() - 24 * 60 * 60_000;
+      const rawSamples = deps.samples.recentFor(name, since);
+      const samples = deriveCpuCores(rawSamples, clkTck);
+      const storageSamples = deps.storage.recentFor(name, since);
+      const pair = deps.samples.latestPair(name);
+      const latestCpuCores = pair.length === 2 ? deriveCpuCores(pair, clkTck)[1]!.cpuCores : null;
+      const buckets = deps.storage.latestPerBucketFor(name);
+      const latestStorageBytes =
+        buckets.length > 0 ? buckets.reduce((acc, b) => acc + b.sizeBytes, 0) : null;
       const audit = deps.audit.recentFor(name, 50);
       return c.json({
         instance: {
@@ -72,8 +129,11 @@ export function buildRoutes(deps: RouteDeps): Hono {
           createdAt: inst.createdAt,
           updatedAt: inst.updatedAt,
           lastError: inst.lastError ?? null,
+          latestCpuCores,
+          latestStorageBytes,
         },
         samples,
+        storageSamples,
         audit,
       });
     } catch (err: unknown) {

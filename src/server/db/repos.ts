@@ -143,6 +143,24 @@ export class ResourceSampleRepo {
   }
 
   recentFor(name: string, sinceMs: number): ResourceSample[] {
+    // Pull one extra sample older than `sinceMs` so callers that derive
+    // delta-based metrics (CPU%) have a starting reference point and the
+    // first plotted point isn't pushed forward by one sample interval.
+    const olderRow = this.db
+      .query<
+        {
+          instance_name: string;
+          taken_at: number;
+          rss_kb: number;
+          cpu_ticks: number;
+          fd_count: number;
+        },
+        [string, number]
+      >(
+        'SELECT instance_name, taken_at, rss_kb, cpu_ticks, fd_count FROM resource_samples WHERE instance_name = ? AND taken_at < ? ORDER BY taken_at DESC LIMIT 1',
+      )
+      .get(name, sinceMs);
+
     const rows = this.db
       .query<
         {
@@ -157,13 +175,52 @@ export class ResourceSampleRepo {
         'SELECT instance_name, taken_at, rss_kb, cpu_ticks, fd_count FROM resource_samples WHERE instance_name = ? AND taken_at >= ? ORDER BY taken_at',
       )
       .all(name, sinceMs);
-    return rows.map((r) => ({
+
+    const mapped = rows.map((r) => ({
       instanceName: r.instance_name,
       takenAt: r.taken_at,
       rssKb: r.rss_kb,
       cpuTicks: r.cpu_ticks,
       fdCount: r.fd_count,
     }));
+    if (olderRow) {
+      mapped.unshift({
+        instanceName: olderRow.instance_name,
+        takenAt: olderRow.taken_at,
+        rssKb: olderRow.rss_kb,
+        cpuTicks: olderRow.cpu_ticks,
+        fdCount: olderRow.fd_count,
+      });
+    }
+    return mapped;
+  }
+
+  // Returns the most recent two samples for delta-based metric derivation
+  // (e.g. CPU%). Order: oldest first.
+  latestPair(name: string): ResourceSample[] {
+    const rows = this.db
+      .query<
+        {
+          instance_name: string;
+          taken_at: number;
+          rss_kb: number;
+          cpu_ticks: number;
+          fd_count: number;
+        },
+        [string]
+      >(
+        'SELECT instance_name, taken_at, rss_kb, cpu_ticks, fd_count FROM resource_samples WHERE instance_name = ? ORDER BY taken_at DESC LIMIT 2',
+      )
+      .all(name);
+    return rows
+      .map((r) => ({
+        instanceName: r.instance_name,
+        takenAt: r.taken_at,
+        rssKb: r.rss_kb,
+        cpuTicks: r.cpu_ticks,
+        fdCount: r.fd_count,
+      }))
+      .reverse();
   }
 
   latestFor(name: string): ResourceSample | null {
@@ -190,6 +247,104 @@ export class ResourceSampleRepo {
           fdCount: r.fd_count,
         }
       : null;
+  }
+}
+
+export interface StorageSample {
+  instanceName: string;
+  takenAt: number;
+  bucketSuffix: string;
+  sizeBytes: number;
+  objectCount: number;
+  partial: boolean;
+}
+
+export class StorageSampleRepo {
+  constructor(private readonly db: DB) {}
+
+  insertMany(samples: StorageSample[]): void {
+    if (samples.length === 0) return;
+    const stmt = this.db.prepare(
+      'INSERT INTO storage_samples (instance_name, taken_at, bucket_suffix, size_bytes, object_count, partial) VALUES (?, ?, ?, ?, ?, ?)',
+    );
+    this.db.transaction(() => {
+      for (const s of samples) {
+        stmt.run(
+          s.instanceName,
+          s.takenAt,
+          s.bucketSuffix,
+          s.sizeBytes,
+          s.objectCount,
+          s.partial ? 1 : 0,
+        );
+      }
+    })();
+  }
+
+  recentFor(name: string, sinceMs: number): StorageSample[] {
+    const rows = this.db
+      .query<
+        {
+          instance_name: string;
+          taken_at: number;
+          bucket_suffix: string;
+          size_bytes: number;
+          object_count: number;
+          partial: number;
+        },
+        [string, number]
+      >(
+        'SELECT instance_name, taken_at, bucket_suffix, size_bytes, object_count, partial FROM storage_samples WHERE instance_name = ? AND taken_at >= ? ORDER BY taken_at',
+      )
+      .all(name, sinceMs);
+    return rows.map((r) => ({
+      instanceName: r.instance_name,
+      takenAt: r.taken_at,
+      bucketSuffix: r.bucket_suffix,
+      sizeBytes: r.size_bytes,
+      objectCount: r.object_count,
+      partial: r.partial === 1,
+    }));
+  }
+
+  latestPerBucketFor(name: string): StorageSample[] {
+    const rows = this.db
+      .query<
+        {
+          instance_name: string;
+          taken_at: number;
+          bucket_suffix: string;
+          size_bytes: number;
+          object_count: number;
+          partial: number;
+        },
+        [string]
+      >(
+        `SELECT s.instance_name, s.taken_at, s.bucket_suffix, s.size_bytes, s.object_count, s.partial
+         FROM storage_samples s
+         INNER JOIN (
+           SELECT bucket_suffix, MAX(taken_at) AS max_taken
+           FROM storage_samples
+           WHERE instance_name = ?1
+           GROUP BY bucket_suffix
+         ) latest
+           ON s.bucket_suffix = latest.bucket_suffix
+           AND s.taken_at = latest.max_taken
+         WHERE s.instance_name = ?1`,
+      )
+      .all(name);
+    return rows.map((r) => ({
+      instanceName: r.instance_name,
+      takenAt: r.taken_at,
+      bucketSuffix: r.bucket_suffix,
+      sizeBytes: r.size_bytes,
+      objectCount: r.object_count,
+      partial: r.partial === 1,
+    }));
+  }
+
+  pruneOlderThan(cutoffMs: number): void {
+    this.db.prepare('DELETE FROM storage_samples WHERE taken_at < ?').run(cutoffMs);
   }
 }
 

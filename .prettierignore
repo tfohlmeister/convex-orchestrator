@@ -5,3 +5,4 @@ coverage
 *.lockb
 openspec
 .github
+.remember

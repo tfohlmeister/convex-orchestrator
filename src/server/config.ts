@@ -43,6 +43,14 @@ const envSchema = z.object({
   S3_ACCESS_KEY: z.string().min(1),
   S3_SECRET_KEY: z.string().min(1),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+  // How often the storage sampler walks each instance's MinIO buckets to
+  // record their total size + object count. 5 min default — disk grows in
+  // MB scale per upload, not per second.
+  STORAGE_SAMPLE_INTERVAL_MS: z.coerce.number().int().min(10_000).default(300_000),
+  // Per-bucket pagination cap to prevent a single misconfigured instance with
+  // millions of objects from locking up the sampler. 100 pages × 1000 keys =
+  // 100k objects per bucket per tick.
+  STORAGE_SCAN_PAGE_LIMIT: z.coerce.number().int().min(1).default(100),
 });
 
 export type Config = z.infer<typeof envSchema> & {

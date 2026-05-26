@@ -6,14 +6,22 @@ import { serveStatic } from 'hono/bun';
 import { loadConfig } from './config.ts';
 import { createLogger } from './logger.ts';
 import { openDatabase } from './db/index.ts';
-import { AuditRepo, InstanceRepo, PortRepo, ResourceSampleRepo } from './db/repos.ts';
+import {
+  AuditRepo,
+  InstanceRepo,
+  PortRepo,
+  ResourceSampleRepo,
+  StorageSampleRepo,
+} from './db/repos.ts';
 import { PortAllocator } from './ports.ts';
 import { PostgresStorage } from './storage/postgres.ts';
 import { MinioStorage } from './storage/minio.ts';
+import { StorageSampler } from './storage/sampler.ts';
 import { Supervisor } from './supervisor/supervisor.ts';
 import { TraefikWriter } from './traefik/writer.ts';
 import { Orchestrator } from './orchestrator.ts';
 import { buildRoutes } from './api/routes.ts';
+import { getClkTck } from './system.ts';
 
 export async function bootstrap(): Promise<void> {
   const config = loadConfig();
@@ -27,7 +35,9 @@ export async function bootstrap(): Promise<void> {
   const instances = new InstanceRepo(db, config.ORCHESTRATOR_MASTER_KEY);
   const ports = new PortAllocator(new PortRepo(db));
   const samples = new ResourceSampleRepo(db);
+  const storage = new StorageSampleRepo(db);
   const audit = new AuditRepo(db);
+  logger.info({ clkTck: getClkTck() }, 'resolved CLK_TCK for CPU sample derivation');
 
   const postgres = new PostgresStorage({
     adminConnectionString: config.POSTGRES_ADMIN_URL,
@@ -81,8 +91,18 @@ export async function bootstrap(): Promise<void> {
     traefik,
   });
 
+  const storageSampler = new StorageSampler({
+    minio,
+    repo: storage,
+    logger,
+    getRunningInstances: () => instances.listByStatus('running'),
+    intervalMs: config.STORAGE_SAMPLE_INTERVAL_MS,
+    pageLimit: config.STORAGE_SCAN_PAGE_LIMIT,
+  });
+
   let ready = false;
   supervisor.startBackgroundJobs();
+  storageSampler.start();
 
   const existing = instances.list();
   traefik.replaceAll(
@@ -145,6 +165,7 @@ export async function bootstrap(): Promise<void> {
     orchestrator,
     config,
     samples,
+    storage,
     audit,
     ready: () => ready,
   });
@@ -196,6 +217,7 @@ export async function bootstrap(): Promise<void> {
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
     logger.info({ sig }, 'shutting down');
     supervisor.stopBackgroundJobs();
+    storageSampler.stop();
     await supervisor.stopAllForShutdown();
     await server.stop();
     await deploymentsServer.stop();
