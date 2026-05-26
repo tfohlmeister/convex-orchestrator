@@ -3,22 +3,38 @@ import { Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { InstancesPage } from './pages/Instances';
 import { InstanceDetailPage } from './pages/InstanceDetail';
 import { DashboardEmbedPage } from './pages/DashboardEmbed';
-import { getToken, setToken, clearToken } from './api';
+import { api, getToken, setToken, clearToken, type AuthMode } from './api';
 
 export function App() {
   const [token, setTokenState] = useState(getToken());
+  const [authMode, setAuthMode] = useState<AuthMode | null>(null);
 
   useEffect(() => {
-    if (!token) {
+    api
+      .getAuthMode()
+      .then(setAuthMode)
+      .catch(() => setAuthMode('bearer'));
+  }, []);
+
+  useEffect(() => {
+    if (authMode === 'bearer' && !token) {
       const entered = window.prompt('Enter ORCHESTRATOR_ADMIN_TOKEN');
       if (entered) {
         setToken(entered);
         setTokenState(entered);
       }
     }
-  }, [token]);
+  }, [authMode, token]);
 
-  if (!token) {
+  if (authMode === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-slate-400">Loading…</p>
+      </div>
+    );
+  }
+
+  if (authMode === 'bearer' && !token) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p className="text-slate-400">Token required</p>
@@ -40,15 +56,17 @@ export function App() {
             Instances
           </NavLink>
         </nav>
-        <button
-          onClick={() => {
-            clearToken();
-            setTokenState('');
-          }}
-          className="mt-auto text-xs text-slate-500 hover:text-slate-300 text-left"
-        >
-          Clear token
-        </button>
+        {authMode === 'bearer' && (
+          <button
+            onClick={() => {
+              clearToken();
+              setTokenState('');
+            }}
+            className="mt-auto text-xs text-slate-500 hover:text-slate-300 text-left"
+          >
+            Clear token
+          </button>
+        )}
       </aside>
       <main className="flex-1 p-6">
         <Routes>

@@ -39,6 +39,12 @@ export async function bootstrap(): Promise<void> {
   const audit = new AuditRepo(db);
   logger.info({ clkTck: getClkTck() }, 'resolved CLK_TCK for CPU sample derivation');
 
+  if (config.ORCHESTRATOR_ADMIN_TOKEN.length === 0) {
+    logger.warn(
+      'ORCHESTRATOR_ADMIN_TOKEN is unset — /api/* is OPEN. Put an auth layer (Traefik basicauth, Authelia, oauth2-proxy, …) in front, or set the token.',
+    );
+  }
+
   const postgres = new PostgresStorage({
     adminConnectionString: config.POSTGRES_ADMIN_URL,
     sharedDatabase: config.POSTGRES_SHARED_DB,

@@ -9,7 +9,17 @@ const envSchema = z.object({
   EXTERNAL_SCHEME: z.enum(['http', 'https']).default('https'),
   EXTERNAL_PORT_SUFFIX: z.string().default(''),
   ORCHESTRATOR_MASTER_KEY: z.string().regex(/^[0-9a-f]{64}$/i),
-  ORCHESTRATOR_ADMIN_TOKEN: z.string().min(16),
+  // Optional. When set (>=16 chars) the orchestrator enforces
+  // `Authorization: Bearer <token>` on every /api/* route. When unset or
+  // empty the API + UI are open — meant for setups where an external
+  // auth layer (Traefik basicauth, Authelia, oauth2-proxy, Cloudflare
+  // Access, etc.) sits in front of the orchestrator.
+  ORCHESTRATOR_ADMIN_TOKEN: z
+    .string()
+    .refine((v) => v === '' || v.length >= 16, {
+      message: 'must be empty or at least 16 chars',
+    })
+    .default(''),
   HTTP_PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
   DATA_DIR: z.string().default('/var/lib/orchestrator'),
   LOG_DIR: z.string().default('/var/log/convex'),

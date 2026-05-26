@@ -61,12 +61,18 @@ export interface RouteDeps {
 
 export function buildRoutes(deps: RouteDeps): Hono {
   const app = new Hono();
-  const requireBearer = bearerAuth(deps.config.ORCHESTRATOR_ADMIN_TOKEN);
+  const authEnabled = deps.config.ORCHESTRATOR_ADMIN_TOKEN.length > 0;
+  const requireBearer = authEnabled
+    ? bearerAuth(deps.config.ORCHESTRATOR_ADMIN_TOKEN)
+    : passthrough;
 
   app.get('/healthz', (c) => c.json({ ok: true }));
   app.get('/readyz', (c) =>
     deps.ready() ? c.json({ ready: true }) : c.json({ ready: false }, 503),
   );
+  // Unauthenticated probe so the UI can decide whether to prompt for a
+  // token. Returns the active mode only, never the token itself.
+  app.get('/api/auth/mode', (c) => c.json({ mode: authEnabled ? 'bearer' : 'none' }));
 
   app.get('/api/deployments', requireBearer, (c) => c.json(deps.orchestrator.deployments()));
 
@@ -224,6 +230,10 @@ function bearerAuth(token: string) {
     }
     await next();
   };
+}
+
+async function passthrough(_c: Context, next: () => Promise<void>): Promise<void> {
+  await next();
 }
 
 async function readTail(file: string, tailLines: number): Promise<string> {

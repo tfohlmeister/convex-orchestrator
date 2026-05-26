@@ -107,7 +107,10 @@ export class ApiError extends Error {
   }
 }
 
+export type AuthMode = 'bearer' | 'none';
+
 export const api = {
+  getAuthMode: () => request<{ mode: AuthMode }>('/api/auth/mode').then((r) => r.mode),
   listInstances: () =>
     request<{ instances: InstanceListItem[] }>('/api/instances').then((r) => r.instances),
   getInstance: (name: string) => request<InstanceDetail>(`/api/instances/${name}`),

@@ -23,11 +23,20 @@ Self-hosted Convex is single-tenant by design: one backend process serves one de
 git clone https://github.com/<user>/convex-orchestrator.git
 cd convex-orchestrator/docker
 cp .env.example .env
-$EDITOR .env   # set BASE_DOMAIN, ORCHESTRATOR_MASTER_KEY, ORCHESTRATOR_ADMIN_TOKEN, ...
+$EDITOR .env   # set BASE_DOMAIN, ORCHESTRATOR_MASTER_KEY, ...
 docker compose up -d
 ```
 
-Open `https://orchestrator.<BASE_DOMAIN>`, paste your `ORCHESTRATOR_ADMIN_TOKEN`, and create your first instance. Click `Dashboard ↗` on any row to land in the official Convex dashboard, embedded and auto-authenticated for that instance.
+Open `https://orchestrator.<BASE_DOMAIN>` and create your first instance. Click `Dashboard ↗` on any row to land in the official Convex dashboard, embedded and auto-authenticated for that instance.
+
+### Auth
+
+By default the orchestrator's `/api/*` is **open**. Bring your own auth layer in front of it:
+
+- **Bearer token built-in** — set `ORCHESTRATOR_ADMIN_TOKEN` (≥16 chars, e.g. `openssl rand -hex 32`). The UI then prompts for it on first load and stores it in `localStorage`.
+- **Reverse-proxy auth** — leave the token empty and front the orchestrator with Traefik's `basicauth` middleware, Authelia, oauth2-proxy, Cloudflare Access, etc. The orchestrator already honors `X-Forwarded-User` for audit attribution.
+
+When the token is empty the server logs a boot-time `WARN: /api/* is OPEN` so you don't ship that config to the public internet by accident.
 
 ### Dev / homelab variant (HTTP, no Let's Encrypt)
 
