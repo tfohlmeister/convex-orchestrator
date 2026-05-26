@@ -35,6 +35,9 @@ logs/
 *.swp
 *.swo
 
+# Playwright local snapshots / state
+.playwright-cli/
+
 # OS
 .DS_Store
 Thumbs.db

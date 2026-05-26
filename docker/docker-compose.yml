@@ -1,0 +1,129 @@
+name: convex-orchestrator
+
+services:
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: convex-orchestrator:local
+    container_name: orchestrator
+    restart: unless-stopped
+    environment:
+      BASE_DOMAIN: ${BASE_DOMAIN}
+      ORCHESTRATOR_MASTER_KEY: ${ORCHESTRATOR_MASTER_KEY}
+      ORCHESTRATOR_ADMIN_TOKEN: ${ORCHESTRATOR_ADMIN_TOKEN}
+      # Cluster URL has NO db name path; orchestrator appends POSTGRES_SHARED_DB
+      # per backend spawn. See docs/spike-notes.md §5.
+      POSTGRES_CLUSTER_URL: postgres://convex:${POSTGRES_PASSWORD}@postgres:5432
+      POSTGRES_ADMIN_URL: postgres://convex:${POSTGRES_PASSWORD}@postgres:5432/postgres
+      POSTGRES_SHARED_DB: convex_tenants
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      TRAEFIK_DYNAMIC_PATH: /etc/traefik/dynamic/orchestrator.yml
+      TRAEFIK_CERT_RESOLVER: letsencrypt
+      TRAEFIK_SERVICE_LOOPBACK: orchestrator
+      LOG_LEVEL: info
+    volumes:
+      - orchestrator-data:/var/lib/orchestrator
+      - convex-logs:/var/log/convex
+      - traefik-dynamic:/etc/traefik/dynamic
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', '--silent', 'http://127.0.0.1:8080/healthz']
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+    labels:
+      # The orchestrator serves BOTH its own UI (host `orchestrator.<base>`)
+      # AND the bundled Convex dashboard static export (host
+      # `dashboard.<base>`) from the same Hono process via host-header
+      # routing. No separate dashboard container needed; see spike-notes §6.
+      traefik.enable: 'true'
+      traefik.http.services.orchestrator.loadbalancer.server.port: '8080'
+      traefik.http.routers.orchestrator.rule: Host(`orchestrator.${BASE_DOMAIN}`)
+      traefik.http.routers.orchestrator.entrypoints: websecure
+      traefik.http.routers.orchestrator.tls.certresolver: letsencrypt
+      traefik.http.routers.orchestrator.service: orchestrator
+      traefik.http.routers.dashboard.rule: Host(`dashboard.${BASE_DOMAIN}`)
+      traefik.http.routers.dashboard.entrypoints: websecure
+      traefik.http.routers.dashboard.tls.certresolver: letsencrypt
+      traefik.http.routers.dashboard.service: orchestrator
+
+  postgres:
+    image: postgres:16
+    container_name: orchestrator-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: convex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: convex
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U convex -d convex']
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+
+  minio:
+    image: minio/minio:latest
+    container_name: orchestrator-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '--fail', '--silent', 'http://localhost:9000/minio/health/live']
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+
+  traefik:
+    image: traefik:v3.2
+    container_name: orchestrator-traefik
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=${DNS_PROVIDER}
+      - --api.dashboard=false
+      - --log.level=INFO
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      # Pass your DNS provider's required env vars here from the host .env file.
+      # See https://doc.traefik.io/traefik/https/acme/#providers for the full list.
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:-}
+      HETZNER_API_KEY: ${HETZNER_API_KEY:-}
+      GANDI_API_KEY: ${GANDI_API_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-dynamic:/etc/traefik/dynamic
+      - traefik-acme:/etc/traefik
+
+volumes:
+  orchestrator-data:
+  convex-logs:
+  postgres-data:
+  minio-data:
+  traefik-dynamic:
+  traefik-acme:

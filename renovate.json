@@ -1,0 +1,32 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits", ":dependencyDashboard"],
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchPackageNames": ["get-convex/convex-backend"],
+      "groupName": "convex-backend",
+      "schedule": ["at any time"]
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "groupName": "npm patch/minor",
+      "automerge": true
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github-actions",
+      "automerge": true
+    }
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": ["docker/Dockerfile$"],
+      "matchStrings": ["ARG CONVEX_VERSION=(?<currentValue>.+?)\\s"],
+      "depNameTemplate": "get-convex/convex-backend",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}

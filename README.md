@@ -21,13 +21,15 @@ Self-hosted Convex is single-tenant by design: one backend process serves one de
 
 ```bash
 git clone https://github.com/<user>/convex-orchestrator.git
-cd convex-orchestrator
+cd convex-orchestrator/docker
 cp .env.example .env
-$EDITOR .env   # set BASE_DOMAIN, ORCHESTRATOR_MASTER_KEY, ORCHESTRATOR_ADMIN_TOKEN
+$EDITOR .env   # set BASE_DOMAIN, ORCHESTRATOR_MASTER_KEY, ORCHESTRATOR_ADMIN_TOKEN, ...
 docker compose up -d
 ```
 
-Open `https://orchestrator.<BASE_DOMAIN>`, log in, create your first instance.
+Open `https://orchestrator.<BASE_DOMAIN>`, paste your `ORCHESTRATOR_ADMIN_TOKEN`, and create your first instance. Click `Dashboard ↗` on any row to land in the official Convex dashboard, embedded and auto-authenticated for that instance.
+
+The Dockerfile pulls the Convex backend binary from the official `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key` from the same git tag (FSL-1.1-Apache-2.0 permits local builds), and bundles the dashboard static export — no separate dashboard container needed. See [`docs/spike-notes.md`](docs/spike-notes.md) for the full architecture write-up.
 
 ## Architecture
 
