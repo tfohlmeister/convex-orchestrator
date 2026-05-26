@@ -29,6 +29,16 @@ docker compose up -d
 
 Open `https://orchestrator.<BASE_DOMAIN>`, paste your `ORCHESTRATOR_ADMIN_TOKEN`, and create your first instance. Click `Dashboard ↗` on any row to land in the official Convex dashboard, embedded and auto-authenticated for that instance.
 
+### Dev / homelab variant (HTTP, no Let's Encrypt)
+
+If you don't have a public domain with DNS-01 wildcard credentials, or your host already runs something on 80/443, layer the HTTP-only dev override on top of the default file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+This exposes Traefik on `TRAEFIK_HTTP_PORT` (default 18000), drops the cert-resolver wiring, and tells the orchestrator to emit `http://...:18000` origin URLs everywhere. Point `BASE_DOMAIN` at any wildcard that resolves to the host (e.g. `*.cvx.lan` via your local DNS).
+
 The Dockerfile pulls the Convex backend binary from the official `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key` from the same git tag (FSL-1.1-Apache-2.0 permits local builds), and bundles the dashboard static export — no separate dashboard container needed. See [`docs/spike-notes.md`](docs/spike-notes.md) for the full architecture write-up.
 
 ## Architecture

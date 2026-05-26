@@ -1,0 +1,50 @@
+# HTTP-only dev override for the prod `docker-compose.yml`. Use when:
+#  - you don't have a public domain + Let's Encrypt DNS-provider creds, or
+#  - the host already has another reverse proxy on 80/443, or
+#  - you just want to poke at the orchestrator on your laptop.
+#
+# Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Pair with a `.env` where you set BASE_DOMAIN to a hostname that resolves
+# to the host running the compose stack (a wildcard A record, a /etc/hosts
+# entry, or your router's local DNS). Default below assumes `*.cvx.lan ->
+# this host` is already configured.
+#
+# The override:
+#   - drops the websecure entrypoint and Let's Encrypt cert resolver
+#   - exposes the orchestrator on plain HTTP on TRAEFIK_HTTP_PORT (default 18000)
+#   - rewires the docker labels to use the `web` entrypoint
+#   - tells the orchestrator to emit `http://` URLs with the port suffix
+#     when constructing CONVEX_CLOUD_ORIGIN, Dashboard-embed iframe src, etc.
+
+services:
+  orchestrator:
+    environment:
+      TRAEFIK_ENTRYPOINT: web
+      TRAEFIK_CERT_RESOLVER: ''
+      EXTERNAL_SCHEME: http
+      EXTERNAL_PORT_SUFFIX: ':${TRAEFIK_HTTP_PORT:-18000}'
+    labels:
+      traefik.enable: 'true'
+      traefik.http.services.orchestrator.loadbalancer.server.port: '8080'
+      traefik.http.routers.orchestrator.rule: Host(`orchestrator.${BASE_DOMAIN}`)
+      traefik.http.routers.orchestrator.entrypoints: web
+      traefik.http.routers.orchestrator.tls.certresolver: ''
+      traefik.http.routers.orchestrator.service: orchestrator
+      traefik.http.routers.dashboard.rule: Host(`dashboard.${BASE_DOMAIN}`)
+      traefik.http.routers.dashboard.entrypoints: web
+      traefik.http.routers.dashboard.tls.certresolver: ''
+      traefik.http.routers.dashboard.service: orchestrator
+
+  traefik:
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --api.dashboard=false
+      - --log.level=INFO
+    ports: !override
+      - '${TRAEFIK_HTTP_PORT:-18000}:80'
