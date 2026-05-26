@@ -24,6 +24,10 @@ services:
       TRAEFIK_DYNAMIC_PATH: /etc/traefik/dynamic/orchestrator.yml
       TRAEFIK_CERT_RESOLVER: letsencrypt
       TRAEFIK_SERVICE_LOOPBACK: orchestrator
+      # Backends must accept connections from the bridge network so the
+      # Traefik container can reach them; 127.0.0.1 inside this container
+      # is invisible from outside the container's network namespace.
+      CONVEX_BIND_ADDRESS: 0.0.0.0
       LOG_LEVEL: info
     volumes:
       - orchestrator-data:/var/lib/orchestrator

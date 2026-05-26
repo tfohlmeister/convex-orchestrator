@@ -35,6 +35,11 @@ const envSchema = z.object({
   // drops the `tls` block in that case.
   TRAEFIK_ENTRYPOINT: z.string().default('websecure'),
   TRAEFIK_SERVICE_LOOPBACK: z.string().default('host.docker.internal'),
+  // Address each supervised convex-backend listens on. Default 127.0.0.1
+  // keeps every backend bound to loopback (right for a bare-metal single
+  // process). Set to 0.0.0.0 in the docker-compose layout so Traefik in
+  // its own container can reach the backends via the bridge network.
+  CONVEX_BIND_ADDRESS: z.string().default('127.0.0.1'),
   TRAEFIK_AUTH_MIDDLEWARES: z.string().optional(),
   // Cluster URL WITHOUT a db name path: e.g. postgres://convex:pw@postgres:5432
   // The orchestrator appends the shared multitenant db name when spawning each

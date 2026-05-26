@@ -16,6 +16,12 @@ export interface SupervisorDeps {
   };
   externalScheme: 'http' | 'https';
   externalPortSuffix: string;
+  // Address the spawned backend listens on. 127.0.0.1 keeps the backend
+  // reachable only inside the orchestrator process's network namespace
+  // (correct for a single-host bare-metal install); 0.0.0.0 exposes it on
+  // every interface (required when Traefik runs in a separate container
+  // and reaches the orchestrator via the docker bridge network).
+  bindAddress: string;
   resourceSink: ResourceSink;
   onStatusChange: (
     name: string,
@@ -92,7 +98,7 @@ export class Supervisor {
       s3AccessKey: this.deps.s3.accessKey,
       s3SecretKey: this.deps.s3.secretKey,
       s3Region: this.deps.s3.region,
-      bindAddress: '127.0.0.1',
+      bindAddress: this.deps.bindAddress,
       externalScheme: this.deps.externalScheme,
       externalPortSuffix: this.deps.externalPortSuffix,
     });

@@ -77,6 +77,7 @@ export async function bootstrap(): Promise<void> {
     },
     externalScheme: config.EXTERNAL_SCHEME,
     externalPortSuffix: config.EXTERNAL_PORT_SUFFIX,
+    bindAddress: config.CONVEX_BIND_ADDRESS,
     resourceSink: samples,
     onStatusChange: (name, status, lastError) => {
       instances.updateStatus(name, status, lastError ?? null);
