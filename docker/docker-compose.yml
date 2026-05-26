@@ -88,12 +88,14 @@ services:
       start_period: 10s
 
   traefik:
-    image: traefik:v3.2
+    image: traefik:v3.5
     container_name: orchestrator-traefik
     restart: unless-stopped
     command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
+      # Docker provider disabled — Traefik's docker client uses an API
+      # version that Docker daemon 29.x rejects (1.24 < 1.40 minimum).
+      # All routes (per-instance + orchestrator-self) come from the file
+      # provider; the orchestrator writes both files into the shared volume.
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
       - --entrypoints.web.address=:80
@@ -110,6 +112,10 @@ services:
       - '80:80'
       - '443:443'
     environment:
+      # Recent Docker daemons (29.x+) require API >= 1.40 from clients;
+      # without this Traefik defaults to an ancient version and the daemon
+      # refuses the connection.
+      DOCKER_API_VERSION: '1.45'
       # Pass your DNS provider's required env vars here from the host .env file.
       # See https://doc.traefik.io/traefik/https/acme/#providers for the full list.
       CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:-}

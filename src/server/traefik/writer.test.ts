@@ -39,9 +39,10 @@ describe('TraefikWriter', () => {
       sitePort: 13213,
     });
     const first = writer.render();
+    expect(first).not.toBeNull();
     expect(first).toContain('alpha-cloud');
     expect(first).toContain('beta-cloud');
-    expect(first.indexOf('alpha-cloud')).toBeLessThan(first.indexOf('beta-cloud'));
+    expect(first!.indexOf('alpha-cloud')).toBeLessThan(first!.indexOf('beta-cloud'));
     expect(first).toContain('certResolver: le');
     expect(first).toContain('http://127.0.0.1:13210');
   });
@@ -111,7 +112,38 @@ describe('TraefikWriter', () => {
     });
     writer.remove('foo');
     const out = writer.render();
+    expect(out).not.toBeNull();
     expect(out).not.toContain('foo-cloud');
     expect(out).toContain('bar-cloud');
+  });
+
+  test('returns null and unlinks output file when no routes are registered', async () => {
+    const writer = new TraefikWriter({
+      outputPath: path,
+      certResolver: 'le',
+      entryPoint: 'websecure',
+      serviceLoopback: '127.0.0.1',
+    });
+    writer.set({
+      instanceName: 'foo',
+      cloudHost: 'foo.cvx.local',
+      siteHost: 'foo-site.cvx.local',
+      cloudPort: 13210,
+      sitePort: 13211,
+    });
+    await writer.commit();
+    expect(await readFile(path, 'utf8')).toContain('foo-cloud');
+
+    writer.remove('foo');
+    expect(writer.render()).toBeNull();
+    await writer.commit();
+    let existed = true;
+    try {
+      await readFile(path, 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') existed = false;
+      else throw err;
+    }
+    expect(existed).toBe(false);
   });
 });

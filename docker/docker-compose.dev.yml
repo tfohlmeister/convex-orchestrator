@@ -20,6 +20,11 @@
 
 services:
   orchestrator:
+    build:
+      # Use host networking during build so apt-get can resolve and reach
+      # deb.debian.org. On some hosts (e.g. the NAS) buildkit's default
+      # bridge network silently drops apt's package-list fetch.
+      network: host
     environment:
       TRAEFIK_ENTRYPOINT: web
       TRAEFIK_CERT_RESOLVER: ''
@@ -39,8 +44,6 @@ services:
 
   traefik:
     command:
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
       - --providers.file.directory=/etc/traefik/dynamic
       - --providers.file.watch=true
       - --entrypoints.web.address=:80

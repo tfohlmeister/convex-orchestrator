@@ -12,7 +12,7 @@ ARG CONVEX_ARM64_SHA256=9f831789ad36a5e1e0f73fb54a626e0bbf7c8aff55250b7e74ee2783
 ARG CONVEX_DASHBOARD_SHA256=cb730167425cffc69aecc7a0d1708067726734b213f5832b0d94bf22ded16380
 
 # ---------- Stage 1: web build ----------
-FROM oven/bun:1.1 AS web-build
+FROM oven/bun:1.3 AS web-build
 WORKDIR /app
 COPY package.json bun.lockb* ./
 RUN bun install --frozen-lockfile || bun install
@@ -21,13 +21,16 @@ COPY src ./src
 RUN bun run build:web
 
 # ---------- Stage 2: server build ----------
-FROM oven/bun:1.1 AS server-build
+FROM oven/bun:1.3 AS server-build
 WORKDIR /app
 COPY package.json bun.lockb* ./
 RUN bun install --frozen-lockfile || bun install
 COPY tsconfig.json ./
 COPY src/server ./src/server
 RUN bun build src/server/index.ts --target=bun --outdir=dist/server --minify
+# bun build only emits JS bundles; the migrations are loaded at runtime via
+# `import.meta.url`-resolved scandir, so they need to sit next to the bundle.
+RUN cp -r src/server/db/migrations dist/server/migrations
 
 # ---------- Stage 3: fetch convex-local-backend from the release zip ----------
 FROM debian:bookworm-slim AS convex-backend-bin
@@ -56,7 +59,7 @@ RUN set -eux; \
       exit 1; \
     fi; \
     unzip convex.zip; \
-    install -m 0755 convex-local-backend /out/convex-local-backend
+    install -D -m 0755 convex-local-backend /out/convex-local-backend
 
 # ---------- Stage 3b: fetch dashboard static export ----------
 # Convex publishes the dashboard as a pre-built static export (~3 MB zip) on
@@ -100,7 +103,7 @@ RUN cargo build --release -p keybroker --bin generate_key \
     && install -m 0755 target/release/generate_key /generate_key
 
 # ---------- Stage 5: runtime ----------
-FROM oven/bun:1.1-slim AS runtime
+FROM oven/bun:1.3-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl tini libpq5 \
     && rm -rf /var/lib/apt/lists/*

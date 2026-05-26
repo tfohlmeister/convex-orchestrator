@@ -1,4 +1,4 @@
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { RouteSpec } from '../supervisor/types.ts';
 
@@ -31,7 +31,7 @@ export class TraefikWriter {
     for (const spec of specs) this.routes.set(spec.instanceName, spec);
   }
 
-  render(): string {
+  render(): string | null {
     const routers: Record<string, unknown> = {};
     const services: Record<string, unknown> = {};
     const middlewares = this.cfg.middlewares ?? [];
@@ -72,6 +72,11 @@ export class TraefikWriter {
       };
     }
 
+    // Empty routers/services blocks make Traefik's file provider log a
+    // "cannot be a standalone element" watcher error on every reload.
+    // Signal "no per-instance file" by returning null; commit() unlinks
+    // the output file instead of writing a placeholder.
+    if (Object.keys(routers).length === 0) return null;
     return toYaml({ http: { routers, services } });
   }
 
@@ -83,6 +88,14 @@ export class TraefikWriter {
   private async doCommit(): Promise<void> {
     const content = this.render();
     await mkdir(dirname(this.cfg.outputPath), { recursive: true });
+    if (content === null) {
+      try {
+        await unlink(this.cfg.outputPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+      return;
+    }
     const tmp = `${this.cfg.outputPath}.tmp.${process.pid}.${Date.now()}`;
     await writeFile(tmp, content, 'utf8');
     await rename(tmp, this.cfg.outputPath);
