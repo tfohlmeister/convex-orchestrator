@@ -38,6 +38,12 @@ logs/
 # Playwright local snapshots / state
 .playwright-cli/
 
+# Locally auto-installed OpenSpec skill + slash-command files. The openspec
+# tooling overwrites these on update; keep them out of git so they don't
+# show as a perpetual diff.
+.claude/commands/opsx/
+.claude/skills/openspec-*/
+
 # OS
 .DS_Store
 Thumbs.db
