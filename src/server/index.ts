@@ -126,6 +126,7 @@ export async function bootstrap(): Promise<void> {
     forceRestartBackend: (name, actor) => orchestrator.forceRestartBackend(name, actor),
     internalHost: '127.0.0.1',
   });
+  orchestrator.attachBackupManager(backupManager);
 
   const restoreManager = new RestoreManager({
     config,

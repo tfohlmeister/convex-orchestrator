@@ -8,7 +8,7 @@ import type { Config } from '../config.ts';
 import type { AuditRepo, BackupRepo, InstanceRepo, Backup, RestoreJobRepo } from '../db/repos.ts';
 import type { MinioStorage } from '../storage/minio.ts';
 import type { Orchestrator } from '../orchestrator.ts';
-import type { BackupManager } from './manager.ts';
+import { convexVersionStamp, type BackupManager } from './manager.ts';
 import { runImport } from './cli.ts';
 import { OrchestratorError } from '../api/errors.ts';
 
@@ -98,7 +98,7 @@ export class RestoreManager {
       targetKey: null,
       sizeBytes: null,
       sha256: null,
-      convexVersion: process.env.CONVEX_VERSION ?? 'unknown',
+      convexVersion: convexVersionStamp(),
       errorMessage: null,
     });
     try {

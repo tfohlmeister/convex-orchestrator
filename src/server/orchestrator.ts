@@ -9,6 +9,7 @@ import { generateAdminKey } from './storage/admin-key.ts';
 import type { Supervisor } from './supervisor/supervisor.ts';
 import type { Instance } from './supervisor/types.ts';
 import type { TraefikWriter } from './traefik/writer.ts';
+import type { BackupManager } from './backups/manager.ts';
 import { OrchestratorError } from './api/errors.ts';
 import { cloudUrl } from './urls.ts';
 
@@ -23,10 +24,20 @@ export interface OrchestratorDeps {
   minio: MinioStorage;
   supervisor: Supervisor;
   traefik: TraefikWriter;
+  // Optional so the Orchestrator can be constructed before the
+  // BackupManager (the latter currently depends on Orchestrator via
+  // forceRestartBackend). Set via attachBackupManager after both exist.
+  backupManager?: BackupManager;
 }
 
 export class Orchestrator {
   constructor(private readonly deps: OrchestratorDeps) {}
+
+  // Wire the BackupManager after construction to break the circular dep
+  // (BackupManager needs forceRestartBackend on Orchestrator).
+  attachBackupManager(manager: BackupManager): void {
+    this.deps.backupManager = manager;
+  }
 
   list(): Instance[] {
     return this.deps.instances.list();
@@ -118,6 +129,9 @@ export class Orchestrator {
     // instance_name = ? against the internal schema). See spike-notes §5.
     this.deps.ports.release(name);
     this.deps.instances.delete(name);
+    // Purge backup-scheduler state so a same-name recreate gets a fresh
+    // schedule instead of inheriting the predecessor's nextFire timestamp.
+    this.deps.backupManager?.dropInstance(name);
     this.deps.audit.record({ at: Date.now(), actor, action: 'delete', instanceName: name });
   }
 

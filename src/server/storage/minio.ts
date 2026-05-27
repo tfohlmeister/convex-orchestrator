@@ -7,9 +7,9 @@ import {
   HeadBucketCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
-  PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import type { Readable } from 'node:stream';
 
 export const BUCKET_SUFFIXES = [
@@ -133,15 +133,24 @@ export class MinioStorage {
     body: Readable | Uint8Array | Buffer,
     contentLength?: number,
   ): Promise<void> {
-    await this.client.send(
-      new PutObjectCommand({
+    // lib-storage's Upload handles multipart, unknown length, and the
+    // 5 GiB single-PUT cap that the bare PutObjectCommand path used to
+    // impose. ContentLength is still respected when known so MinIO
+    // skips one round-trip. queueSize: 1 keeps memory bounded — we
+    // already stream from a file, no point uploading parts in parallel
+    // and doubling RAM use on a homelab-sized backup.
+    const upload = new Upload({
+      client: this.client,
+      params: {
         Bucket: this.backupBucket(prefix),
         Key: key,
         Body: body,
         ContentType: 'application/zip',
-        ContentLength: contentLength,
-      }),
-    );
+        ...(contentLength != null ? { ContentLength: contentLength } : {}),
+      },
+      queueSize: 1,
+    });
+    await upload.done();
   }
 
   async headBackup(

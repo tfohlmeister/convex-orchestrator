@@ -43,7 +43,10 @@ interface QueuedJob {
 // Coarse-grained version stamp included in backup rows for forensics. The
 // real Convex binary version is the immutable Docker ARG CONVEX_VERSION but
 // we read it lazily from env to avoid plumbing it everywhere.
-function convexVersionStamp(): string {
+// Exported so the manual-upload path in restore.ts can stamp rows with
+// the same identifier; otherwise the two paths would drift if anyone
+// ever changed the source (env var → binary read, etc.).
+export function convexVersionStamp(): string {
   return process.env.CONVEX_VERSION ?? 'unknown';
 }
 
@@ -65,6 +68,15 @@ export class BackupManager {
   private inflight = new Set<string>();
 
   constructor(private readonly deps: BackupManagerDeps) {}
+
+  // Called from Orchestrator.delete to purge per-instance scheduler state.
+  // Without this, a delete + recreate of the same name within the same
+  // process inherits the stale nextFire timestamp, silently skipping the
+  // fresh instance's first auto-backup window.
+  dropInstance(name: string): void {
+    this.nextFire.delete(name);
+    this.cronCache.delete(name);
+  }
 
   start(): void {
     if (!this.deps.config.BACKUP_SCHEDULER_ENABLED) {

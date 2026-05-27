@@ -62,16 +62,12 @@ export async function runExport(args: RunExportArgs): Promise<RunExportResult> {
     deploymentUrl: args.deploymentUrl,
     adminKey: args.adminKey,
     timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    cliArgs: [
-      'export',
-      '--url',
-      args.deploymentUrl,
-      '--admin-key',
-      args.adminKey,
-      '--include-file-storage',
-      '--path',
-      args.outputPath,
-    ],
+    // --url + --admin-key intentionally omitted here. The CONVEX_SELF_HOSTED_*
+    // env vars below tell the CLI the same thing, but they don't appear in
+    // /proc/<pid>/cmdline. With both env and flags set the CLI prefers the
+    // flags, so passing them as argv would leak the admin key to any process
+    // that can ps the orchestrator.
+    cliArgs: ['export', '--include-file-storage', '--path', args.outputPath],
     onLog: args.onLog,
   });
 
@@ -98,12 +94,9 @@ export async function runImport(args: RunImportArgs): Promise<RunImportResult> {
     deploymentUrl: args.deploymentUrl,
     adminKey: args.adminKey,
     timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    // Same env-only credential delivery as runExport; see comment there.
     cliArgs: [
       'import',
-      '--url',
-      args.deploymentUrl,
-      '--admin-key',
-      args.adminKey,
       '--replace-all',
       // Storage is auto-detected from the zip contents — there is no
       // --include-file-storage flag on import. -y skips the destructive
