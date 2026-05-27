@@ -40,6 +40,13 @@ interface Tracked {
 
 export class Supervisor {
   private tracked = new Map<string, Tracked>();
+  // Timers scheduled by handleExit for crash recovery. Sit in this map only
+  // during the backoff window between the prior exit and the actual spawn,
+  // so stop() can cancel a pending respawn the operator no longer wants.
+  // Without this map, stop() during the backoff gap is a no-op (the Tracked
+  // entry has already been deleted by handleExit) and the setTimeout still
+  // fires, silently overriding the operator's stop.
+  private pendingRespawn = new Map<string, NodeJS.Timeout>();
   private sampler: ResourceSampler;
 
   constructor(private readonly deps: SupervisorDeps) {
@@ -71,6 +78,14 @@ export class Supervisor {
   }
 
   async stop(name: string): Promise<void> {
+    // Cancel any pending respawn first; the operator wants this instance
+    // to stay down, and a fired setTimeout would override that.
+    const pending = this.pendingRespawn.get(name);
+    if (pending) {
+      clearTimeout(pending);
+      this.pendingRespawn.delete(name);
+      this.deps.onStatusChange(name, 'stopped');
+    }
     const t = this.tracked.get(name);
     if (!t) return;
     t.stopRequested = true;
@@ -80,6 +95,8 @@ export class Supervisor {
   }
 
   async stopAllForShutdown(): Promise<void> {
+    for (const timer of this.pendingRespawn.values()) clearTimeout(timer);
+    this.pendingRespawn.clear();
     const procs = Array.from(this.tracked.values()).map((t) => {
       t.stopRequested = true;
       return t.handle.proc;
@@ -134,7 +151,8 @@ export class Supervisor {
       return;
     }
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this.pendingRespawn.delete(instance.name);
       void this.spawn(instance, decision.nextState).catch((err: unknown) => {
         this.deps.onStatusChange(
           instance.name,
@@ -143,5 +161,6 @@ export class Supervisor {
         );
       });
     }, decision.delayMs);
+    this.pendingRespawn.set(instance.name, timer);
   }
 }
