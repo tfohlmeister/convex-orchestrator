@@ -18,6 +18,10 @@ export interface SupervisorDeps {
   };
   externalScheme: 'http' | 'https';
   externalPortSuffix: string;
+  // Optional spawn override for tests. Production wires spawnConvex
+  // (the default export from ./spawn.ts); tests pass a fake that
+  // resolves to a controllable SpawnHandle.
+  spawn?: typeof spawnConvex;
   // Address the spawned backend listens on. 127.0.0.1 keeps the backend
   // reachable only inside the orchestrator process's network namespace
   // (correct for a single-host bare-metal install); 0.0.0.0 exposes it on
@@ -108,7 +112,8 @@ export class Supervisor {
   }
 
   private async spawn(instance: Instance, backoff: BackoffState): Promise<void> {
-    const handle = await spawnConvex({
+    const spawnFn = this.deps.spawn ?? spawnConvex;
+    const handle = await spawnFn({
       instance,
       binaryPath: this.deps.binaryPath,
       logDir: this.deps.logDir,
