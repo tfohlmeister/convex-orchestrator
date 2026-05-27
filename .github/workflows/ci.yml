@@ -70,14 +70,75 @@ jobs:
           tags: convex-orchestrator:test
 
       - name: Run smoke test
+        # The orchestrator's required env (POSTGRES_*, S3_*) means a
+        # bare `docker run` won't even pass config validation. Bring up
+        # postgres + minio on a shared network first, then wire the
+        # orchestrator at them. `set +e` around the curl so we can
+        # always dump `docker logs` for diagnostics, then propagate
+        # the curl exit code as the step result.
         run: |
-          docker run -d --name orch \
+          set -euo pipefail
+          docker network create orch-ci
+          docker run -d --name pg --network orch-ci \
+            -e POSTGRES_USER=convex \
+            -e POSTGRES_PASSWORD=ci-pw \
+            -e POSTGRES_DB=convex \
+            --health-cmd='pg_isready -U convex -d convex' \
+            --health-interval=2s --health-timeout=2s --health-retries=20 \
+            postgres:16
+          docker run -d --name minio --network orch-ci \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minio-ci-pw \
+            --health-cmd='curl -fsS http://localhost:9000/minio/health/live' \
+            --health-interval=2s --health-timeout=2s --health-retries=20 \
+            minio/minio:latest server /data
+          # Wait for both to be healthy.
+          for svc in pg minio; do
+            for i in $(seq 1 30); do
+              status=$(docker inspect -f '{{.State.Health.Status}}' "$svc")
+              [ "$status" = "healthy" ] && break
+              [ "$i" = 30 ] && { docker logs "$svc"; exit 1; }
+              sleep 2
+            done
+          done
+          docker run -d --name orch --network orch-ci \
+            -e BASE_DOMAIN=cvx.local \
             -e ORCHESTRATOR_MASTER_KEY=$(openssl rand -hex 32) \
             -e ORCHESTRATOR_ADMIN_TOKEN=$(openssl rand -hex 32) \
-            -e BASE_DOMAIN=cvx.local \
+            -e POSTGRES_CLUSTER_URL=postgres://convex:ci-pw@pg:5432 \
+            -e POSTGRES_ADMIN_URL=postgres://convex:ci-pw@pg:5432/postgres \
+            -e POSTGRES_SHARED_DB=convex_tenants \
+            -e S3_ENDPOINT=http://minio:9000 \
+            -e S3_REGION=us-east-1 \
+            -e S3_ACCESS_KEY=minioadmin \
+            -e S3_SECRET_KEY=minio-ci-pw \
+            -e CONVEX_BIND_ADDRESS=0.0.0.0 \
+            -e LOG_LEVEL=info \
             -p 8080:8080 \
             convex-orchestrator:test
-          sleep 10
-          curl -fsS http://localhost:8080/healthz
-          docker logs orch
-          docker rm -f orch
+          # Poll /healthz with a deadline; dump logs on every failure
+          # path so we always get diagnostics if something's wrong.
+          ok=
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/healthz; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          echo
+          echo '--- orchestrator logs ---'
+          docker logs orch || true
+          if [ -z "$ok" ]; then
+            echo 'orchestrator did not become healthy within 60s'
+            exit 1
+          fi
+          # /readyz should also be green by now (instances replayed,
+          # postgres reachable). And the auth-mode probe should report
+          # bearer since we set the token.
+          curl -fsS http://localhost:8080/readyz
+          mode=$(curl -fsS http://localhost:8080/api/auth/mode)
+          echo "auth-mode: $mode"
+          [ "$mode" = '{"mode":"bearer"}' ] || { echo "unexpected mode"; exit 1; }
+          docker rm -f orch pg minio
+          docker network rm orch-ci
