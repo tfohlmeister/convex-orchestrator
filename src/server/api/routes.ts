@@ -553,7 +553,11 @@ async function readTail(file: string, tailLines: number): Promise<string> {
     await fh.read(buf, 0, chunkSize, size - chunkSize);
     const text = buf.toString('utf8');
     const lines = text.split('\n');
-    return lines.slice(-tailLines).join('\n');
+    // When the read started mid-file the first split element is almost
+    // certainly a partial line. Drop it so the UI never renders a
+    // truncated leading line as if it were real log output.
+    const usable = size > chunkSize ? lines.slice(1) : lines;
+    return usable.slice(-tailLines).join('\n');
   } finally {
     await fh.close();
   }
@@ -561,6 +565,12 @@ async function readTail(file: string, tailLines: number): Promise<string> {
 
 function streamLog(c: Context, file: string): Response {
   const BACKLOG_BYTES = 4096;
+  // Tolerate transient fs hiccups (rotation in flight, brief lock) but
+  // give up and tell the client when something is genuinely wrong —
+  // without this the loop used to spin forever on a permanent error
+  // (file unlinked, permissions changed) while the UI kept showing
+  // "live" indefinitely.
+  const MAX_CONSECUTIVE_ERRORS = 5;
   return stream(c, async (s) => {
     s.onAbort(() => {
       /* client gone */
@@ -574,6 +584,7 @@ function streamLog(c: Context, file: string): Response {
     } catch {
       /* file may not exist yet */
     }
+    let consecutiveErrors = 0;
     while (!s.aborted) {
       try {
         const sz = (await stat(file)).size;
@@ -590,8 +601,17 @@ function streamLog(c: Context, file: string): Response {
         } else if (sz < position) {
           position = 0;
         }
-      } catch {
-        /* swallow */
+        consecutiveErrors = 0;
+      } catch (err) {
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          // Surface the failure to the client as a sentinel line and
+          // exit — the LogTail component will flip its badge to
+          // "disconnected" instead of pulsing "live" forever.
+          const msg = err instanceof Error ? err.message : String(err);
+          await s.write(`\n[orchestrator] log stream stopped: ${msg}\n`);
+          return;
+        }
       }
       await s.sleep(1000);
     }
