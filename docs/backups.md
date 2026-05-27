@@ -6,6 +6,12 @@ README; for the engineering reference see [`architecture.md`](./architecture.md)
 
 ## Backup pipeline
 
+One scheduled backup goes through five steps end to end: the in-process scheduler ticks every
+minute, the manager inserts a `running` row, spawns `convex export --include-file-storage`,
+hashes + uploads the resulting `.zip` to MinIO via `@aws-sdk/lib-storage`'s `Upload` helper, and
+finally flips the row to `complete` with size + sha256. Manual backups skip the scheduler step;
+everything else is identical.
+
 ![Backup flow](./diagrams/backup-flow.svg)
 
 ## What is in a backup
@@ -80,6 +86,10 @@ The button:
 The very next scheduled or manual backup proceeds normally.
 
 ### Restoring
+
+The restore flow takes a `pre-restore` backup first, then stops and respawns the backend (to
+clear any stale `ExportInProgress` lock), then runs `convex import --replace-all`. Any failure
+before the import step aborts the restore with the original data intact.
 
 ![Restore flow](./diagrams/restore-flow.svg)
 

@@ -20,10 +20,12 @@ export interface PostgresConfig {
   sharedDatabase: string;
 }
 
-// Per docs/spike-notes.md §5: `postgres-v5-multitenant` mode means ONE shared
-// database for all tenants, no per-instance schemas. This adapter's job is
-// trivial: make sure the shared database exists. Tenant isolation is enforced
-// inside the Convex backend by the `instance_name` column.
+// `postgres-v5-multitenant` mode means ONE shared database for all tenants,
+// no per-instance schemas — this adapter's job is trivial: make sure the
+// shared database exists. Tenant isolation is enforced inside the Convex
+// backend by the `instance_name` column on every system table. See
+// docs/architecture.md § Design decisions worth knowing for the empirical
+// findings that drove this choice.
 export class PostgresStorage {
   private pool: pg.Pool;
 

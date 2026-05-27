@@ -42,7 +42,9 @@ const envSchema = z.object({
   TRAEFIK_AUTH_MIDDLEWARES: z.string().optional(),
   // Cluster URL WITHOUT a db name path: e.g. postgres://convex:pw@postgres:5432
   // The orchestrator appends the shared multitenant db name when spawning each
-  // backend. See docs/spike-notes.md §5.
+  // backend. See docs/architecture.md § Design decisions worth knowing for
+  // why postgres-v5-multitenant is the only path that supports a shared
+  // cluster.
   POSTGRES_CLUSTER_URL: z.string().url(),
   // Admin URL used to create the shared database if absent. Should target the
   // postgres maintenance db: e.g. postgres://convex:pw@postgres:5432/postgres

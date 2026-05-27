@@ -8,8 +8,9 @@ export interface SpawnHandle {
   stderrLog: RotatingLog;
 }
 
-// Verified against the real backend on 2026-05-26. See docs/spike-notes.md §2
-// and §5 for the contract. Key points:
+// Verified against the real backend on 2026-05-26. See
+// docs/architecture.md § Design decisions worth knowing for the
+// env-vars-not-flags contract. Key points:
 //   - postgres URL is the positional DB_SPEC, not POSTGRES_URL env.
 //   - postgres-v5-multitenant is required for multi-tenant operation on a
 //     shared cluster; postgres-v5 hardcodes the db name to "carnitas".

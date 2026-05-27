@@ -13,7 +13,8 @@ services:
       ORCHESTRATOR_MASTER_KEY: ${ORCHESTRATOR_MASTER_KEY}
       ORCHESTRATOR_ADMIN_TOKEN: ${ORCHESTRATOR_ADMIN_TOKEN}
       # Cluster URL has NO db name path; orchestrator appends POSTGRES_SHARED_DB
-      # per backend spawn. See docs/spike-notes.md §5.
+      # per backend spawn. See docs/architecture.md § Design decisions worth
+      # knowing for why postgres-v5-multitenant is required.
       POSTGRES_CLUSTER_URL: postgres://convex:${POSTGRES_PASSWORD}@postgres:5432
       POSTGRES_ADMIN_URL: postgres://convex:${POSTGRES_PASSWORD}@postgres:5432/postgres
       POSTGRES_SHARED_DB: convex_tenants
@@ -53,7 +54,8 @@ services:
       # The orchestrator serves BOTH its own UI (host `orchestrator.<base>`)
       # AND the bundled Convex dashboard static export (host
       # `dashboard.<base>`) from the same Hono process via host-header
-      # routing. No separate dashboard container needed; see spike-notes §6.
+      # routing. No separate dashboard container needed; see
+      # docs/architecture.md § Design decisions worth knowing.
       traefik.enable: 'true'
       traefik.http.services.orchestrator.loadbalancer.server.port: '8080'
       traefik.http.routers.orchestrator.rule: Host(`orchestrator.${BASE_DOMAIN}`)

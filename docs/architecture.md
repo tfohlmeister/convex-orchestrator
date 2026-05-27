@@ -20,7 +20,7 @@ One Hono process inside one container does five things:
   `providers.file.watch=true` never sees a partial file. Per-instance cloud and site routers are
   added or removed in place — no Traefik restart.
 - **Talks to Postgres and MinIO** for shared storage. Each backend's `convex-backend` is launched
-  with `--mode postgres-v5-multitenant` and S3 env vars pointing at MinIO with a per-instance
+  with `-d postgres-v5-multitenant` and S3 env vars pointing at MinIO with a per-instance
   bucket prefix.
 
 Standalone editorial-styled version of this diagram lives at
@@ -45,7 +45,7 @@ Operator-initiated `stop` during the respawn backoff cancels the pending `setTim
 backend stays down. Without that cancel, the operator's stop would race the scheduled spawn — the
 backend would come back up after stop returned successfully, while Traefik already removed the
 route. The supervisor keeps a `pendingRespawn: Map<name, NodeJS.Timeout>` for this reason; see
-`src/server/supervisor/supervisor.ts:73-95`.
+`Supervisor` in `src/server/supervisor/supervisor.ts`.
 
 On orchestrator restart, instances marked `running` are re-spawned by `restoreRunning()`;
 `stopped` and `error` are left alone for operator action.
@@ -95,10 +95,10 @@ to retry or roll forward.
 ## Storage layout
 
 - **Postgres** (shared): one cluster, one shared multitenant database (`POSTGRES_SHARED_DB`,
-  default `convex_tenants`). Backends run with `--mode postgres-v5-multitenant` and pass their
+  default `convex_tenants`). Backends run with `-d postgres-v5-multitenant` and pass their
   instance name + secret; rows carry an `instance_name` discriminator column inside the shared
   tables. Per-tenant purge on delete is a Phase 2 problem; for now tenant rows linger after
-  `DELETE` (see `src/server/orchestrator.ts:115-122`).
+  `DELETE` (see `Orchestrator.delete` in `src/server/orchestrator.ts`).
 - **MinIO / S3** (shared): five buckets per instance, named
   `<instance>-{exports,snapshot-imports,modules,files,search}`, plus one
   `<instance>-backups` bucket the orchestrator uses for its own backup zips.
@@ -119,9 +119,51 @@ between the per-instance writer and the self-routes writer (`src/server/traefik/
 (`src/server/urls.ts`) so URLs are consistent across the list endpoint, detail endpoint, the
 deployment switcher payload, and the dashboard postMessage handshake.
 
+## Design decisions worth knowing
+
+A few load-bearing findings from the original Phase 0 spike, kept here because the code shape only
+makes sense in their context:
+
+**`-d postgres-v5-multitenant` is required for shared Postgres.** Convex's documented
+`postgres-v5` mode hardcodes the database name to `carnitas` and rejects URLs that already
+contain one. That means two single-tenant Convex backends cannot share a Postgres cluster — the
+whole "many tenants on one Postgres" value proposition would be impossible. `postgres-v5-multitenant`
+is listed in the CLI help but not in Convex's public docs; it accepts a URL with a real database
+name, requires `--instance-name` + `--instance-secret` as CLI flags (env vars are not enough in
+this mode), and stores rows in shared system tables (`documents`, `indexes`, `leases`,
+`persistence_globals`, `read_only`) with an `instance_name` discriminator column. The orchestrator
+hard-codes this mode in `src/server/supervisor/spawn.ts`. Per-tenant purge on delete is a Phase 2
+problem; for now `DELETE` leaves tenant rows behind in the shared tables (see
+`Orchestrator.delete` in `src/server/orchestrator.ts`).
+
+**The Convex backend is configured by env vars, not CLI flags, for almost everything.**
+`run_backend.sh` in the official image is the real contract: `POSTGRES_URL` (positional `DB_SPEC`
+inside the script), `CONVEX_CLOUD_ORIGIN` / `CONVEX_SITE_ORIGIN` (not `*_URL`),
+`S3_STORAGE_{EXPORTS,SNAPSHOT_IMPORTS,MODULES,FILES,SEARCH}_BUCKET` (five env vars, full bucket
+names, no flag prefix), `AWS_*` for S3 creds, `INSTANCE_NAME` / `INSTANCE_SECRET` for the multi-
+tenant identity, `DO_NOT_REQUIRE_SSL` for plain Postgres, `DISABLE_BEACON` for telemetry. Only
+`-p`, `--site-proxy-port`, `-i`, `-d`, and `--s3-storage` are CLI flags. See the comment block in
+`src/server/supervisor/spawn.ts` for the canonical invocation.
+
+**`generate_key` is built from source, not pulled from a release.** The release zip contains only
+`convex-local-backend`. The `generate_key` source (FSL-1.1-Apache-2.0, local build explicitly
+permitted) is a 60-line clap wrapper around `KeyBroker::issue_admin_key`. The Dockerfile builds
+it from the same git tag pinned by `CONVEX_VERSION` so the binary cannot drift from the backend.
+A key generated this way is accepted by the running backend with HTTP 200 — verified end-to-end
+against the NAS deployment on 2026-05-26.
+
+**The dashboard switcher is replaced by orchestrator-driven postMessage credentials.** Convex's
+official dashboard image expects `NEXT_PUBLIC_DEFAULT_LIST_DEPLOYMENTS_API_PORT` and fetches
+`http://127.0.0.1:<port>/` for the deployment list — but the `127.0.0.1` resolves on the user's
+browser, not the dashboard container, so the switcher cannot work for remote access. We ship the
+dashboard static export ourselves (downloaded from the same Convex release tag, sha256-pinned,
+extracted into `dist/dashboard/`) and serve it via host-header routing from the orchestrator's
+own Hono process. The orchestrator UI embeds the dashboard in an `<iframe>` and replies to the
+documented `dashboard-credentials-request` postMessage with the right `adminKey + deploymentUrl`,
+pinned to the explicit dashboard origin so the credentials are not delivered to a different
+origin if the iframe ever redirects (see `src/web/src/pages/DashboardEmbed.tsx`).
+
 ## See also
 
 - [`backups.md`](./backups.md) — operator guide for the backup/restore subsystem
-- [`spike-notes.md`](./spike-notes.md) — original spike notes on Convex CLI flags, multitenant
-  invariants, and dashboard host-header routing
 - [`../openspec/changes/`](../openspec/changes/) — design proposals (active + archived)

@@ -207,8 +207,9 @@ export async function bootstrap(): Promise<void> {
   // Host-based split: requests for dashboard.<base>/* are served from the
   // bundled Convex dashboard static export (with our setup.html helper).
   // Everything else falls through to the orchestrator API + UI.
-  // See docs/spike-notes.md §6 for why we ship the dashboard ourselves rather
-  // than running the official container.
+  // See docs/architecture.md § Design decisions worth knowing for why we
+  // ship the dashboard static export ourselves rather than running the
+  // official container.
   const dashboardRoot = serveStatic({ root: './dist/dashboard' });
   const dashboardIndex = serveStatic({ path: './dist/dashboard/index.html' });
   app.use('*', async (c, next) => {

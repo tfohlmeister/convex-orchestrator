@@ -7,3 +7,8 @@ openspec
 .github
 .remember
 *.yaml
+
+# Editorial diagram artifacts — hand-tuned inline-SVG layout. Prettier
+# wraps every attribute onto its own line, which makes the SVG body
+# unreadable and turns small visual edits into multi-hundred-line diffs.
+docs/diagrams/

@@ -131,7 +131,9 @@ export class Orchestrator {
     // NOTE: In postgres-v5-multitenant mode there's no per-instance schema to
     // drop; tenant rows for this instance remain in the shared tables. True
     // per-tenant purge is a Phase 2 problem (manual DELETE WHERE
-    // instance_name = ? against the internal schema). See spike-notes §5.
+    // instance_name = ? against the internal schema). See
+    // docs/architecture.md § Design decisions worth knowing for the
+    // background.
     this.deps.ports.release(name);
     this.deps.instances.delete(name);
     // Purge backup-scheduler state so a same-name recreate gets a fresh

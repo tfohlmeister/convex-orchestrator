@@ -4,7 +4,8 @@
 # verified by sha256 per architecture. The `generate_key` binary is built from
 # the same git tag (FSL-1.1-Apache-2.0, building locally is permitted): a
 # 60-line clap wrapper around `KeyBroker::issue_admin_key`. Build takes ~90s
-# native, longer under qemu cross-compile. See docs/spike-notes.md §1.
+# native, longer under qemu cross-compile. See
+# docs/architecture.md § Design decisions worth knowing.
 ARG CONVEX_VERSION=precompiled-2026-05-18-c3ac00a
 ARG CONVEX_AMD64_SHA256=2a551877337c80339b746589edc7f2ade22c613160b828e6afcf93294458b430
 ARG CONVEX_ARM64_SHA256=9f831789ad36a5e1e0f73fb54a626e0bbf7c8aff55250b7e74ee278370c49518

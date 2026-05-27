@@ -143,11 +143,11 @@ requires typing the instance name as confirmation, same UX as Restore.
 ## Documentation
 
 - **[Architecture](./docs/architecture.md)** — component model, data flow, the four diagrams in
-  one place with prose
+  one place with prose, plus the load-bearing design decisions (why
+  `postgres-v5-multitenant`, why env-vars-not-flags, why build `generate_key` from source, why
+  postMessage instead of the dashboard switcher)
 - **[Backups & Restore](./docs/backups.md)** — operator guide: retention tuning, force-restart-
   backend, off-site sync, recovery playbooks
-- **[Spike notes](./docs/spike-notes.md)** — low-level engineering notes from the original spike
-  (Convex CLI flags, postgres-v5-multitenant invariants, dashboard host-header routing)
 
 The Dockerfile pulls the Convex backend binary from the official
 `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key`
