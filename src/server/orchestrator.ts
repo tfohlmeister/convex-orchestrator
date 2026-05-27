@@ -28,6 +28,10 @@ export interface OrchestratorDeps {
   // BackupManager (the latter currently depends on Orchestrator via
   // forceRestartBackend). Set via attachBackupManager after both exist.
   backupManager?: BackupManager;
+  // Optional generateAdminKey override for tests. Production wires the
+  // real binary-spawning helper from ./storage/admin-key.ts; tests
+  // pass a deterministic stub so create() doesn't need a real binary.
+  generateAdminKey?: typeof generateAdminKey;
 }
 
 export class Orchestrator {
@@ -59,7 +63,8 @@ export class Orchestrator {
     const bucketPrefix = this.deps.minio.bucketPrefix(name);
 
     this.deps.logger.info({ name }, 'creating instance');
-    const adminKey = await generateAdminKey(
+    const genKey = this.deps.generateAdminKey ?? generateAdminKey;
+    const adminKey = await genKey(
       { binaryPath: this.deps.config.GENERATE_KEY_BINARY },
       name,
       instanceSecret,
