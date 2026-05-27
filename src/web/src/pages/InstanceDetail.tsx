@@ -450,6 +450,11 @@ function EmptyChart({ label }: { label: string }) {
   );
 }
 
+type LogStreamState =
+  | { kind: 'connecting' }
+  | { kind: 'live' }
+  | { kind: 'disconnected'; error: string };
+
 function LogsAuditPanel({
   name,
   audit,
@@ -457,6 +462,17 @@ function LogsAuditPanel({
   name: string;
   audit: { at: number; action: string; actor: string; details?: string | null }[];
 }) {
+  const [streamState, setStreamState] = useState<LogStreamState>({ kind: 'connecting' });
+  const badge = (() => {
+    if (streamState.kind === 'live') return <span className="pill pill-ok pulse-dot">live</span>;
+    if (streamState.kind === 'connecting')
+      return <span className="pill pill-warn pulse-dot">connecting</span>;
+    return (
+      <span className="pill pill-danger" title={streamState.error}>
+        disconnected
+      </span>
+    );
+  })();
   return (
     <div className="space-y-8">
       <section>
@@ -467,9 +483,9 @@ function LogsAuditPanel({
               tailed from the backend process
             </div>
           </div>
-          <span className="pill pill-ok pulse-dot">live</span>
+          {badge}
         </div>
-        <LogTail name={name} />
+        <LogTail name={name} onStateChange={setStreamState} />
       </section>
 
       <section>
@@ -516,7 +532,13 @@ function LogsAuditPanel({
   );
 }
 
-function LogTail({ name }: { name: string }) {
+function LogTail({
+  name,
+  onStateChange,
+}: {
+  name: string;
+  onStateChange?: (state: LogStreamState) => void;
+}) {
   const [lines, setLines] = useState<string>('');
   const ref = useRef<HTMLPreElement | null>(null);
 
@@ -524,30 +546,53 @@ function LogTail({ name }: { name: string }) {
     const controller = new AbortController();
     const token = getToken();
     let aborted = false;
+    onStateChange?.({ kind: 'connecting' });
     void (async () => {
-      const res = await fetch(`/api/instances/${name}/logs?stream=stdout&follow=1`, {
-        signal: controller.signal,
-        headers: { authorization: `Bearer ${token}` },
-      });
-      if (!res.body) return;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      while (!aborted) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) {
-          setLines((prev) => (prev + decoder.decode(value)).slice(-50_000));
-          requestAnimationFrame(() => {
-            if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-          });
+      try {
+        const res = await fetch(`/api/instances/${name}/logs?stream=stdout&follow=1`, {
+          signal: controller.signal,
+          headers: { authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          onStateChange?.({ kind: 'disconnected', error: `HTTP ${res.status}` });
+          return;
         }
+        if (!res.body) {
+          onStateChange?.({ kind: 'disconnected', error: 'no response body' });
+          return;
+        }
+        onStateChange?.({ kind: 'live' });
+        const reader = res.body.getReader();
+        // stream:true is load-bearing: a 4-byte codepoint split across two
+        // network chunks would otherwise decode as U+FFFD on the first half.
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        while (!aborted) {
+          const { value, done } = await reader.read();
+          if (done) {
+            // Server closed the stream cleanly (rotation, backend restart).
+            if (!aborted) onStateChange?.({ kind: 'disconnected', error: 'stream closed' });
+            break;
+          }
+          if (value) {
+            setLines((prev) => (prev + decoder.decode(value, { stream: true })).slice(-50_000));
+            requestAnimationFrame(() => {
+              if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+            });
+          }
+        }
+      } catch (err) {
+        // Cleanup-induced AbortError is expected on unmount and tab switch;
+        // anything else is a real disconnect the user should see.
+        if (aborted || (err instanceof Error && err.name === 'AbortError')) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        onStateChange?.({ kind: 'disconnected', error: msg });
       }
     })();
     return () => {
       aborted = true;
       controller.abort();
     };
-  }, [name]);
+  }, [name, onStateChange]);
 
   return (
     <pre

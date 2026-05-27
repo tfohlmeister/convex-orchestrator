@@ -230,7 +230,18 @@ async function downloadBackup(instanceName: string, b: Backup): Promise<void> {
   if (token) (headers as Record<string, string>).authorization = `Bearer ${token}`;
   const res = await fetch(api.downloadBackupUrl(instanceName, b.id), { headers });
   if (!res.ok) {
-    window.alert(`download failed (${res.status})`);
+    // Surface the server's structured error message instead of just the HTTP
+    // status — matters most for the 404 "backup not downloadable" and the
+    // pre-restore-backup-not-yet-complete case where the user needs to know
+    // *why*, not just "failed".
+    let detail = res.statusText;
+    try {
+      const body = (await res.json()) as { error?: string; code?: string };
+      if (body?.error) detail = body.error;
+    } catch {
+      // body wasn't JSON; fall back to statusText
+    }
+    window.alert(`Download failed (HTTP ${res.status}): ${detail}`);
     return;
   }
   const blob = await res.blob();
