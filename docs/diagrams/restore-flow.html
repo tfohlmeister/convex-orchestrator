@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>convex-orchestrator · Restore flow</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --color-paper: #f5f4ed;
+        --color-ink: #0b0d0b;
+        --color-muted: #52534e;
+        --color-soft: #65655c;
+        --color-accent: #f7591f;
+      }
+      body {
+        font-family: 'Geist', system-ui, sans-serif;
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .frame { max-width: 1240px; width: 100%; }
+      .eyebrow {
+        font-family: 'Geist Mono', ui-monospace, monospace;
+        font-size: 0.66rem; font-weight: 500;
+        letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--color-muted); margin-bottom: 0.5rem;
+      }
+      h1 {
+        font-family: 'Instrument Serif', serif;
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+        margin-bottom: 0.4rem;
+      }
+      .subtitle {
+        font-size: 0.95rem; color: var(--color-muted);
+        margin-bottom: 1.75rem; max-width: 64ch; line-height: 1.45;
+      }
+      svg { width: 100%; min-width: 1000px; display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Restore flow · convex-orchestrator</p>
+      <h1>A destructive restore, with a rollback point baked in</h1>
+      <p class="subtitle">
+        Every restore takes a <code>pre-restore</code> backup first. The backend is fully stopped
+        and respawned before <code>convex import --replace-all</code> runs so the export lock can
+        not race the import. Any failure before the import step aborts the restore with the
+        original data intact.
+      </p>
+
+      <svg viewBox="0 0 1080 760" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="rgba(11,13,11,0.10)" />
+          </pattern>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#52534e" />
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f7591f" />
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f4ed" />
+        <rect width="100%" height="100%" fill="url(#dots)" opacity="0.6" />
+
+        <!-- Lifelines -->
+        <line x1="120" y1="120" x2="120" y2="688" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="340" y1="120" x2="340" y2="688" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="560" y1="120" x2="560" y2="688" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="780" y1="120" x2="780" y2="688" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="980" y1="120" x2="980" y2="688" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+
+        <!-- Activation bars -->
+        <rect x="336" y="172" width="8" height="476"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="0.8" />
+        <rect x="556" y="260" width="8" height="80"
+              fill="rgba(11,13,11,0.06)" stroke="#52534e" stroke-width="0.8" />
+        <rect x="776" y="428" width="8" height="44"
+              fill="rgba(11,13,11,0.06)" stroke="#52534e" stroke-width="0.8" />
+        <rect x="976" y="516" width="8" height="84"
+              fill="rgba(11,13,11,0.06)" stroke="#52534e" stroke-width="0.8" />
+
+        <!-- 1. Operator → RestoreManager -->
+        <line x1="124" y1="172" x2="336" y2="172" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="160" y="158" width="140" height="12" rx="2" fill="#f5f4ed" />
+        <text x="230" y="167" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">POST /restore · confirm</text>
+
+        <!-- 2. RestoreManager self: INSERT job queued -->
+        <path d="M 348 200 L 372 200 L 372 220 L 348 220" stroke="#52534e" stroke-width="1"
+              fill="none" marker-end="url(#arrow)" />
+        <text x="380" y="215" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" letter-spacing="0.06em">
+          INSERT restore_jobs (queued)
+        </text>
+
+        <!-- 3. RestoreManager → BackupManager: pre-restore -->
+        <line x1="344" y1="260" x2="556" y2="260" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="380" y="246" width="140" height="12" rx="2" fill="#f5f4ed" />
+        <text x="450" y="255" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">runPreRestoreBackup</text>
+
+        <text x="572" y="298" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" letter-spacing="0.06em">
+          full backup pipeline → MinIO
+        </text>
+
+        <!-- 4. BackupManager → RestoreManager: preBackup.id (return) -->
+        <line x1="556" y1="332" x2="348" y2="332" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" marker-end="url(#arrow)" />
+        <rect x="392" y="318" width="116" height="12" rx="2" fill="#f5f4ed" />
+        <text x="450" y="327" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">preBackup.id (rollback)</text>
+
+        <!-- 5. RestoreManager self: download zip from MinIO -->
+        <path d="M 348 360 L 372 360 L 372 380 L 348 380" stroke="#52534e" stroke-width="1"
+              fill="none" marker-end="url(#arrow)" />
+        <text x="380" y="375" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" letter-spacing="0.06em">
+          download source zip from MinIO
+        </text>
+
+        <!-- 6. RestoreManager → Supervisor: stop + start -->
+        <line x1="344" y1="428" x2="776" y2="428" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="476" y="414" width="168" height="12" rx="2" fill="#f5f4ed" />
+        <text x="560" y="423" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">stop · start (fresh process)</text>
+
+        <!-- 7. Supervisor → RestoreManager: running (return) -->
+        <line x1="776" y1="464" x2="348" y2="464" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" marker-end="url(#arrow)" />
+        <rect x="500" y="450" width="120" height="12" rx="2" fill="#f5f4ed" />
+        <text x="560" y="459" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">running · new pid</text>
+
+        <!-- 8. RestoreManager → convex-backend: convex import --replace-all -->
+        <line x1="344" y1="516" x2="976" y2="516" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="568" y="502" width="184" height="12" rx="2" fill="#f5f4ed" />
+        <text x="660" y="511" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">convex import · --replace-all</text>
+
+        <text x="996" y="556" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" letter-spacing="0.06em"
+              text-anchor="end">drops + reloads all tables</text>
+
+        <!-- 9. convex-backend → RestoreManager: exit 0 (return) -->
+        <line x1="976" y1="600" x2="348" y2="600" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" marker-end="url(#arrow)" />
+        <rect x="608" y="586" width="80" height="12" rx="2" fill="#f5f4ed" />
+        <text x="648" y="595" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">exit 0</text>
+
+        <!-- 10. RestoreManager self: persist complete (focal accent) -->
+        <path d="M 348 632 L 372 632 L 372 652 L 348 652" stroke="#f7591f" stroke-width="1.4"
+              fill="none" marker-end="url(#arrow-accent)" />
+        <text x="380" y="648" fill="#f7591f" font-size="9"
+              font-family="'Geist Mono', monospace" letter-spacing="0.06em">
+          UPDATE restore_jobs complete + audit
+        </text>
+
+        <!-- Actor headers -->
+        <rect x="60" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="60" y="80" width="120" height="56" rx="6"
+              fill="rgba(82,83,78,0.10)" stroke="#65655c" stroke-width="1" />
+        <rect x="68" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(101,101,92,0.40)" stroke-width="0.8" />
+        <text x="92" y="95" fill="rgba(101,101,92,0.85)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">USER</text>
+        <text x="120" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">Operator (UI)</text>
+
+        <rect x="280" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="280" y="80" width="120" height="56" rx="6"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <rect x="288" y="86" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(247,89,31,0.55)" stroke-width="0.8" />
+        <text x="316" y="95" fill="#f7591f" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">MANAGER</text>
+        <text x="340" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">RestoreManager</text>
+
+        <rect x="500" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="500" y="80" width="120" height="56" rx="6"
+              fill="#ffffff" stroke="#0b0d0b" stroke-width="1" />
+        <rect x="508" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.40)" stroke-width="0.8" />
+        <text x="532" y="95" fill="rgba(11,13,11,0.75)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">MANAGER</text>
+        <text x="560" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">BackupManager</text>
+
+        <rect x="720" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="720" y="80" width="120" height="56" rx="6"
+              fill="#ffffff" stroke="#0b0d0b" stroke-width="1" />
+        <rect x="728" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.40)" stroke-width="0.8" />
+        <text x="752" y="95" fill="rgba(11,13,11,0.75)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">SUPERVISOR</text>
+        <text x="780" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">Supervisor</text>
+
+        <rect x="920" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="920" y="80" width="120" height="56" rx="6"
+              fill="#ffffff" stroke="#0b0d0b" stroke-width="1" />
+        <rect x="928" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.40)" stroke-width="0.8" />
+        <text x="952" y="95" fill="rgba(11,13,11,0.75)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">BACKEND</text>
+        <text x="980" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">convex-backend</text>
+
+        <!-- Legend -->
+        <line x1="32" y1="716" x2="1048" y2="716"
+              stroke="rgba(11,13,11,0.10)" stroke-width="0.8" />
+        <text x="32" y="734" fill="#52534e" font-size="8"
+              font-family="'Geist Mono', monospace" letter-spacing="0.16em">LEGEND</text>
+        <rect x="116" y="726" width="14" height="10" rx="2"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <text x="136" y="734" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">manager (focal) · primary success path</text>
+        <line x1="500" y1="730" x2="532" y2="730" stroke="#52534e" stroke-width="1" />
+        <text x="538" y="734" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">call</text>
+        <line x1="608" y1="730" x2="640" y2="730" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" />
+        <text x="646" y="734" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">return</text>
+        <rect x="752" y="725" width="8" height="12"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="0.8" />
+        <text x="768" y="734" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">activation</text>
+      </svg>
+    </div>
+  </body>
+</html>

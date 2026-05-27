@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>convex-orchestrator · Backup flow</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #f5f4ed;
+        --color-ink: #0b0d0b;
+        --color-muted: #52534e;
+        --color-soft: #65655c;
+        --color-accent: #f7591f;
+        --color-link: #1a70c7;
+      }
+      body {
+        font-family: 'Geist', system-ui, sans-serif;
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .frame {
+        max-width: 1240px;
+        width: 100%;
+      }
+      .eyebrow {
+        font-family: 'Geist Mono', ui-monospace, monospace;
+        font-size: 0.66rem;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+      h1 {
+        font-family: 'Instrument Serif', serif;
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        margin-bottom: 0.4rem;
+      }
+      .subtitle {
+        font-size: 0.95rem;
+        color: var(--color-muted);
+        margin-bottom: 1.75rem;
+        max-width: 64ch;
+        line-height: 1.45;
+      }
+      svg {
+        width: 100%;
+        min-width: 1000px;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Backup flow · convex-orchestrator</p>
+      <h1>One scheduled backup, from cron tick to MinIO object</h1>
+      <p class="subtitle">
+        The manager hashes while streaming and updates the row only after MinIO acknowledges.
+        Failures roll the row to <code>failed</code>; an in-progress row older than
+        BACKUP_EXPORT_TIMEOUT_MINUTES gets flagged <code>stuck</code> by a separate detector and the
+        UI exposes a force-restart escape hatch.
+      </p>
+
+      <svg viewBox="0 0 1080 640" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="rgba(11,13,11,0.10)" />
+          </pattern>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#52534e" />
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f7591f" />
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f4ed" />
+        <rect width="100%" height="100%" fill="url(#dots)" opacity="0.6" />
+
+        <!-- =========== Lifelines (drawn first) =========== -->
+        <line x1="120" y1="120" x2="120" y2="568" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="340" y1="120" x2="340" y2="568" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="560" y1="120" x2="560" y2="568" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="780" y1="120" x2="780" y2="568" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+        <line x1="980" y1="120" x2="980" y2="568" stroke="rgba(11,13,11,0.20)"
+              stroke-width="1" stroke-dasharray="3,3" />
+
+        <!-- =========== Activation bar on BackupManager (focal lifeline) =========== -->
+        <rect x="336" y="172" width="8" height="356"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="0.8" />
+
+        <!-- Activation on convex-backend during export -->
+        <rect x="776" y="248" width="8" height="80"
+              fill="rgba(11,13,11,0.06)" stroke="#52534e" stroke-width="0.8" />
+
+        <!-- Activation on MinIO during upload -->
+        <rect x="976" y="392" width="8" height="44"
+              fill="rgba(11,13,11,0.06)" stroke="#52534e" stroke-width="0.8" />
+
+        <!-- =========== Messages (top → down) =========== -->
+
+        <!-- 1. cron tick → manager -->
+        <line x1="124" y1="172" x2="336" y2="172" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="180" y="158" width="92" height="12" rx="2" fill="#f5f4ed" />
+        <text x="226" y="167" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">CRON TICK (1MIN)</text>
+
+        <!-- 2. manager → sqlite: INSERT row -->
+        <line x1="344" y1="216" x2="556" y2="216" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="392" y="202" width="116" height="12" rx="2" fill="#f5f4ed" />
+        <text x="450" y="211" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">INSERT status=running</text>
+
+        <!-- 3. manager → backend: convex export -->
+        <line x1="344" y1="252" x2="776" y2="252" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="468" y="238" width="184" height="12" rx="2" fill="#f5f4ed" />
+        <text x="560" y="247" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">convex export · --include-file-storage</text>
+
+        <!-- 4. backend self-action: write zip -->
+        <text x="800" y="288" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" letter-spacing="0.06em">
+          write .zip to BACKUP_WORK_DIR
+        </text>
+
+        <!-- 5. backend → manager: exit 0 + zip path (return, dashed) -->
+        <line x1="776" y1="332" x2="348" y2="332" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" marker-end="url(#arrow)" />
+        <rect x="500" y="318" width="120" height="12" rx="2" fill="#f5f4ed" />
+        <text x="560" y="327" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">exit 0 · file ready</text>
+
+        <!-- 6. manager self-action: hash -->
+        <path d="M 348 360 L 372 360 L 372 380 L 348 380"
+              stroke="#52534e" stroke-width="1" fill="none" marker-end="url(#arrow)" />
+        <text x="380" y="375" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" letter-spacing="0.06em">
+          sha256 + stat
+        </text>
+
+        <!-- 7. manager → minio: Upload (stream) -->
+        <line x1="344" y1="408" x2="976" y2="408" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="588" y="394" width="184" height="12" rx="2" fill="#f5f4ed" />
+        <text x="680" y="403" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">Upload (lib-storage · multipart)</text>
+
+        <!-- 8. minio → manager: 200 OK (return) -->
+        <line x1="976" y1="436" x2="348" y2="436" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" marker-end="url(#arrow)" />
+        <rect x="640" y="422" width="80" height="12" rx="2" fill="#f5f4ed" />
+        <text x="680" y="431" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">200 OK</text>
+
+        <!-- 9. manager → sqlite: UPDATE complete (accent — primary success) -->
+        <line x1="344" y1="488" x2="556" y2="488" stroke="#f7591f" stroke-width="1.4"
+              marker-end="url(#arrow-accent)" />
+        <rect x="376" y="474" width="148" height="12" rx="2" fill="#f5f4ed" />
+        <text x="450" y="483" fill="#f7591f" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">UPDATE complete · sha256</text>
+
+        <!-- 10. manager → sqlite: audit row -->
+        <line x1="344" y1="524" x2="556" y2="524" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="380" y="510" width="140" height="12" rx="2" fill="#f5f4ed" />
+        <text x="450" y="519" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">audit backup_completed</text>
+
+        <!-- =========== Actor headers (drawn AFTER lifelines so they sit on top) =========== -->
+
+        <!-- Scheduler (user/input) -->
+        <rect x="60" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="60" y="80" width="120" height="56" rx="6"
+              fill="rgba(82,83,78,0.10)" stroke="#65655c" stroke-width="1" />
+        <rect x="68" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(101,101,92,0.40)" stroke-width="0.8" />
+        <text x="92" y="95" fill="rgba(101,101,92,0.85)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">INPUT</text>
+        <text x="120" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">Scheduler</text>
+
+        <!-- BackupManager (focal) -->
+        <rect x="280" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="280" y="80" width="120" height="56" rx="6"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <rect x="288" y="86" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(247,89,31,0.55)" stroke-width="0.8" />
+        <text x="316" y="95" fill="#f7591f" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">MANAGER</text>
+        <text x="340" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">BackupManager</text>
+
+        <!-- SQLite -->
+        <rect x="500" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="500" y="80" width="120" height="56" rx="6"
+              fill="rgba(11,13,11,0.05)" stroke="#52534e" stroke-width="1" />
+        <rect x="508" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(82,83,78,0.40)" stroke-width="0.8" />
+        <text x="532" y="95" fill="rgba(82,83,78,0.90)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">STATE</text>
+        <text x="560" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">SQLite · backups</text>
+
+        <!-- convex-backend -->
+        <rect x="720" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="720" y="80" width="120" height="56" rx="6"
+              fill="#ffffff" stroke="#0b0d0b" stroke-width="1" />
+        <rect x="728" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.40)" stroke-width="0.8" />
+        <text x="752" y="95" fill="rgba(11,13,11,0.75)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">BACKEND</text>
+        <text x="780" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">convex-backend</text>
+
+        <!-- MinIO -->
+        <rect x="920" y="80" width="120" height="56" rx="6" fill="#f5f4ed" />
+        <rect x="920" y="80" width="120" height="56" rx="6"
+              fill="rgba(11,13,11,0.05)" stroke="#52534e" stroke-width="1" />
+        <rect x="928" y="86" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(82,83,78,0.40)" stroke-width="0.8" />
+        <text x="952" y="95" fill="rgba(82,83,78,0.90)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">STORE</text>
+        <text x="980" y="122" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">MinIO</text>
+
+        <!-- =========== Legend =========== -->
+        <line x1="32" y1="596" x2="1048" y2="596" stroke="rgba(11,13,11,0.10)"
+              stroke-width="0.8" />
+        <text x="32" y="614" fill="#52534e" font-size="8"
+              font-family="'Geist Mono', monospace" letter-spacing="0.16em">LEGEND</text>
+
+        <rect x="116" y="606" width="14" height="10" rx="2"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <text x="136" y="614" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">manager (focal) · primary success path</text>
+
+        <line x1="500" y1="610" x2="532" y2="610" stroke="#52534e" stroke-width="1" />
+        <text x="538" y="614" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">call</text>
+
+        <line x1="608" y1="610" x2="640" y2="610" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" />
+        <text x="646" y="614" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">return</text>
+
+        <rect x="752" y="605" width="8" height="12"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="0.8" />
+        <text x="768" y="614" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">activation</text>
+      </svg>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>convex-orchestrator · Instance lifecycle</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --color-paper: #f5f4ed;
+        --color-ink: #0b0d0b;
+        --color-muted: #52534e;
+        --color-soft: #65655c;
+        --color-accent: #f7591f;
+      }
+      body {
+        font-family: 'Geist', system-ui, sans-serif;
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .frame { max-width: 1240px; width: 100%; }
+      .eyebrow {
+        font-family: 'Geist Mono', ui-monospace, monospace;
+        font-size: 0.66rem; font-weight: 500;
+        letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--color-muted); margin-bottom: 0.5rem;
+      }
+      h1 {
+        font-family: 'Instrument Serif', serif;
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+        margin-bottom: 0.4rem;
+      }
+      .subtitle {
+        font-size: 0.95rem; color: var(--color-muted);
+        margin-bottom: 1.75rem; max-width: 64ch; line-height: 1.45;
+      }
+      svg { width: 100%; min-width: 1000px; display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Instance lifecycle · convex-orchestrator</p>
+      <h1>Four states, one rollback path, one sink</h1>
+      <p class="subtitle">
+        The supervisor restarts a crashed backend per RESTART_DELAYS_MS up to MAX_RESTARTS within a
+        10-minute window. Past the budget, the instance flips to <code>error</code> with the last
+        exit code in <code>last_error</code>; the operator restores from a recent backup or fixes
+        config and re-starts.
+      </p>
+
+      <svg viewBox="0 0 1080 600" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="rgba(11,13,11,0.10)" />
+          </pattern>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#52534e" />
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f7591f" />
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f4ed" />
+        <rect width="100%" height="100%" fill="url(#dots)" opacity="0.6" />
+
+        <!-- ============== Transitions (drawn first) ============== -->
+
+        <!-- start → creating -->
+        <line x1="84" y1="220" x2="156" y2="220" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="92" y="206" width="60" height="12" rx="2" fill="#f5f4ed" />
+        <text x="122" y="215" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">POST /api</text>
+
+        <!-- creating → running -->
+        <line x1="316" y1="220" x2="396" y2="220" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="324" y="194" width="72" height="20" rx="2" fill="#f5f4ed" />
+        <text x="360" y="203" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">spawn OK</text>
+        <text x="360" y="212" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">+ traefik.set</text>
+
+        <!-- creating → error (rollback path, coral accent) -->
+        <path d="M 236 260 Q 236 360 396 380" stroke="#f7591f" stroke-width="1.4"
+              fill="none" marker-end="url(#arrow-accent)" />
+        <rect x="208" y="310" width="120" height="20" rx="2" fill="#f5f4ed" />
+        <text x="268" y="319" fill="#f7591f" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">spawn throws</text>
+        <text x="268" y="328" fill="#f7591f" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">→ status=error</text>
+
+        <!-- running ↔ stopped (two arrows, opposite directions) -->
+        <line x1="556" y1="208" x2="636" y2="208" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="572" y="194" width="48" height="12" rx="2" fill="#f5f4ed" />
+        <text x="596" y="203" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">/stop</text>
+
+        <line x1="636" y1="232" x2="556" y2="232" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="572" y="234" width="48" height="12" rx="2" fill="#f5f4ed" />
+        <text x="596" y="243" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">/start</text>
+
+        <!-- running self-loop: force-restart-backend -->
+        <path d="M 440 196 Q 440 140 488 140 Q 536 140 504 196"
+              stroke="#52534e" stroke-width="1" fill="none" marker-end="url(#arrow)" />
+        <rect x="412" y="120" width="160" height="12" rx="2" fill="#f5f4ed" />
+        <text x="492" y="129" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">/force-restart-backend</text>
+
+        <!-- running → error: crash budget exhausted -->
+        <line x1="476" y1="260" x2="476" y2="356" stroke="#f7591f" stroke-width="1.4"
+              marker-end="url(#arrow-accent)" />
+        <rect x="396" y="296" width="160" height="20" rx="2" fill="#f5f4ed" />
+        <text x="476" y="305" fill="#f7591f" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">MAX_RESTARTS in 10min</text>
+        <text x="476" y="314" fill="#f7591f" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">→ give-up</text>
+
+        <!-- error → stopped: manual recovery -->
+        <path d="M 556 388 Q 716 388 716 260" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" fill="none" marker-end="url(#arrow)" />
+        <rect x="592" y="378" width="156" height="12" rx="2" fill="#f5f4ed" />
+        <text x="670" y="387" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">operator restores / fixes</text>
+
+        <!-- running → destroyed -->
+        <line x1="556" y1="220" x2="888" y2="220" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" marker-end="url(#arrow)" />
+        <rect x="800" y="206" width="92" height="12" rx="2" fill="#f5f4ed" />
+        <text x="846" y="215" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">DELETE · confirm</text>
+
+        <!-- stopped → destroyed -->
+        <path d="M 796 240 Q 868 240 904 232" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" fill="none" marker-end="url(#arrow)" />
+
+        <!-- ============== Start dot ============== -->
+        <circle cx="76" cy="220" r="6" fill="#0b0d0b" />
+        <text x="76" y="252" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">start</text>
+
+        <!-- ============== End dot (destroyed) ============== -->
+        <circle cx="912" cy="220" r="8" fill="none" stroke="#0b0d0b" stroke-width="1.2" />
+        <circle cx="912" cy="220" r="5" fill="#0b0d0b" />
+        <text x="912" y="252" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.06em">destroyed</text>
+
+        <!-- ============== States (drawn after arrows) ============== -->
+
+        <!-- creating (entry) -->
+        <rect x="156" y="180" width="160" height="80" rx="8" fill="#f5f4ed" />
+        <rect x="156" y="180" width="160" height="80" rx="8"
+              fill="#ffffff" stroke="#0b0d0b" stroke-width="1" />
+        <rect x="164" y="186" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.40)" stroke-width="0.8" />
+        <text x="192" y="195" fill="rgba(11,13,11,0.75)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">ENTRY</text>
+        <text x="236" y="226" fill="#0b0d0b" font-size="13" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">creating</text>
+        <text x="236" y="244" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">
+          gen key · alloc ports · buckets · spawn
+        </text>
+
+        <!-- running (the active state) -->
+        <rect x="396" y="180" width="160" height="80" rx="8" fill="#f5f4ed" />
+        <rect x="396" y="180" width="160" height="80" rx="8"
+              fill="#ffffff" stroke="#0b0d0b" stroke-width="1" />
+        <rect x="404" y="186" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.40)" stroke-width="0.8" />
+        <text x="432" y="195" fill="rgba(11,13,11,0.75)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">ACTIVE</text>
+        <text x="476" y="226" fill="#0b0d0b" font-size="13" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">running</text>
+        <text x="476" y="244" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">
+          supervised · route attached
+        </text>
+
+        <!-- stopped (idle) -->
+        <rect x="636" y="180" width="160" height="80" rx="8" fill="#f5f4ed" />
+        <rect x="636" y="180" width="160" height="80" rx="8"
+              fill="rgba(11,13,11,0.05)" stroke="#52534e" stroke-width="1" />
+        <rect x="644" y="186" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(82,83,78,0.40)" stroke-width="0.8" />
+        <text x="668" y="195" fill="rgba(82,83,78,0.90)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">IDLE</text>
+        <text x="716" y="226" fill="#0b0d0b" font-size="13" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">stopped</text>
+        <text x="716" y="244" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">
+          no process · no route
+        </text>
+
+        <!-- error (focal sink) -->
+        <rect x="396" y="356" width="160" height="80" rx="8" fill="#f5f4ed" />
+        <rect x="396" y="356" width="160" height="80" rx="8"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <rect x="404" y="362" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(247,89,31,0.55)" stroke-width="0.8" />
+        <text x="432" y="371" fill="#f7591f" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle"
+              letter-spacing="0.10em">FAILED</text>
+        <text x="476" y="402" fill="#0b0d0b" font-size="13" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">error</text>
+        <text x="476" y="420" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">
+          last_error stored · UI surfaces it
+        </text>
+
+        <!-- ============== Legend ============== -->
+        <line x1="32" y1="500" x2="1048" y2="500"
+              stroke="rgba(11,13,11,0.10)" stroke-width="0.8" />
+        <text x="32" y="518" fill="#52534e" font-size="8"
+              font-family="'Geist Mono', monospace" letter-spacing="0.16em">LEGEND</text>
+
+        <rect x="116" y="510" width="14" height="10" rx="2"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <text x="136" y="518" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">focal state · the one to notice</text>
+
+        <line x1="392" y1="514" x2="424" y2="514" stroke="#52534e" stroke-width="1" />
+        <text x="430" y="518" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">operator transition</text>
+
+        <line x1="572" y1="514" x2="604" y2="514" stroke="#f7591f" stroke-width="1.4" />
+        <text x="610" y="518" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">failure transition</text>
+
+        <line x1="752" y1="514" x2="784" y2="514" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" />
+        <text x="790" y="518" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">terminal · recovery</text>
+      </svg>
+    </div>
+  </body>
+</html>

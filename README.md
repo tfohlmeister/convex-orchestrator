@@ -1,106 +1,159 @@
 # convex-orchestrator
 
-Run multiple self-hosted [Convex](https://convex.dev) backend instances on a single host with subdomain routing, a unified web UI, and one shared Convex dashboard for all of them.
+Run many [self-hosted Convex](https://github.com/get-convex/convex-backend) backends on a single
+host, route them by subdomain through Traefik, share Postgres + MinIO, and operate the whole fleet
+from one editorial web UI with the official Convex dashboard embedded per-instance.
 
-> **Status: pre-MVP.** This README describes the target shape. Implementation is in progress — see [`openspec/changes/add-convex-orchestrator/`](openspec/changes/add-convex-orchestrator/) for the design, specs, and task list.
+[![CI](https://img.shields.io/github/actions/workflow/status/tfohlmeister/convex-orchestrator/ci.yml?branch=main&label=CI)](https://github.com/tfohlmeister/convex-orchestrator/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
-## Why
+## Features
 
-Self-hosted Convex is single-tenant by design: one backend process serves one deployment. If you run several Convex projects (dev/staging/prod, or multiple apps), you end up with duplicated `docker-compose.yml` files, separate admin keys to track, and no central overview. `convex-orchestrator` fills that gap without forking Convex or rebuilding their multi-tenant routing.
+- **One container, N supervised backends**: each Convex deployment runs as a child process under a
+  Bun-based supervisor with a backoff-aware restart watcher (`RESTART_DELAYS_MS`, `MAX_RESTARTS` in
+  a 10-minute window) and per-instance resource sampling.
+- **Subdomain routing via Traefik file provider**: the orchestrator atomically writes
+  `dynamic.yml` so per-instance `cloud` and `site` hosts are added or removed without restarting
+  Traefik. No docker socket needed.
+- **One Convex dashboard for the whole fleet**: the bundled dashboard static export is served from
+  the same Hono process via host-header routing; credentials are handed to the iframe over
+  `postMessage` so the operator never logs in per instance.
+- **Shared Postgres (multitenant) + MinIO (per-instance bucket prefix)**: keeps the resource
+  footprint flat and lets `convex export`/`convex import` run against any backend without re-
+  provisioning storage.
+- **Scheduled backups + restore, both via Convex's own zip format**: per-instance cron, retention,
+  stuck-export detection, force-restart-backend escape hatch. Restore takes a `pre-restore` backup
+  first so every destructive flow has a rollback point. Restore jobs persist to SQLite and survive
+  orchestrator restarts.
+- **Editorial web UI**: warm-paper editorial design (Instrument Serif + Geist), per-instance
+  tabs (Performance, Logs · Audit, Backups · Settings), live log tail with disconnect surfacing,
+  and a sticky tab bar that survives scroll.
+- **Bring-your-own auth**: optional `ORCHESTRATOR_ADMIN_TOKEN` bearer middleware with
+  `timingSafeEqual`. Leave it empty and front the orchestrator with Traefik basic-auth, Authelia,
+  or oauth2-proxy. The orchestrator logs a startup warning when the API is open.
 
 ## What it does
 
-- **Spawns Convex backend binaries as supervised child processes**, one per instance, all inside a single orchestrator container.
-- **Routes** `<instance>.<base-domain>` and `<instance>-site.<base-domain>` via Traefik (file-provider, atomic writes).
-- **Uses the official Convex dashboard's built-in deployment switcher** — one dashboard container manages every instance.
-- **Shares Postgres** (schema-per-instance) and **MinIO/S3** (bucket-prefix-per-instance) across all instances to keep the resource footprint flat.
-- **Generates admin keys deterministically** via the `generate_key` binary shipped alongside the Convex backend.
-- **Web UI** for create / start / stop / delete, with per-instance CPU/RAM samples and log tailing.
+![Architecture overview](./docs/diagrams/architecture.svg)
 
-## Quickstart (target)
+The orchestrator is one Hono process that supervises N `convex-backend` child processes inside a
+single container, writes a Traefik file-provider `dynamic.yml` for per-instance host routing, and
+serves both its own React UI and the bundled Convex dashboard from the same port. Backends share a
+Postgres cluster in `postgres-v5-multitenant` mode and a MinIO bucket layout with per-instance
+prefixes. The bundled dashboard receives credentials via `postMessage` from the orchestrator UI,
+so the operator never types an admin key per instance.
+
+Standalone editorial-styled diagrams are in [`docs/diagrams/`](docs/diagrams/); a deeper component
+walkthrough plus the backup, restore, and instance-lifecycle diagrams live in
+[`docs/architecture.md`](docs/architecture.md).
+
+## Try it
 
 ```bash
-git clone https://github.com/<user>/convex-orchestrator.git
+git clone https://github.com/tfohlmeister/convex-orchestrator.git
 cd convex-orchestrator/docker
 cp .env.example .env
 $EDITOR .env   # set BASE_DOMAIN, ORCHESTRATOR_MASTER_KEY, ...
 docker compose up -d
 ```
 
-Open `https://orchestrator.<BASE_DOMAIN>` and create your first instance. Click `Dashboard ↗` on any row to land in the official Convex dashboard, embedded and auto-authenticated for that instance.
-
-### Auth
-
-By default the orchestrator's `/api/*` is **open**. Bring your own auth layer in front of it:
-
-- **Bearer token built-in** — set `ORCHESTRATOR_ADMIN_TOKEN` (≥16 chars, e.g. `openssl rand -hex 32`). The UI then prompts for it on first load and stores it in `localStorage`.
-- **Reverse-proxy auth** — leave the token empty and front the orchestrator with Traefik's `basicauth` middleware, Authelia, oauth2-proxy, Cloudflare Access, etc. The orchestrator already honors `X-Forwarded-User` for audit attribution.
-
-When the token is empty the server logs a boot-time `WARN: /api/* is OPEN` so you don't ship that config to the public internet by accident.
+Open `https://orchestrator.<BASE_DOMAIN>` and create your first instance. Click **Dashboard ↗** on
+any row to land in the official Convex dashboard, embedded and auto-authenticated for that
+instance.
 
 ### Dev / homelab variant (HTTP, no Let's Encrypt)
 
-If you don't have a public domain with DNS-01 wildcard credentials, or your host already runs something on 80/443, layer the HTTP-only dev override on top of the default file:
+If you don't have a public domain with DNS-01 wildcard credentials, or your host already runs
+something on 80/443, layer the HTTP-only dev override on top of the default file:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-This exposes Traefik on `TRAEFIK_HTTP_PORT` (default 18000), drops the cert-resolver wiring, and tells the orchestrator to emit `http://...:18000` origin URLs everywhere. Point `BASE_DOMAIN` at any wildcard that resolves to the host (e.g. `*.cvx.lan` via your local DNS).
+This exposes Traefik on `TRAEFIK_HTTP_PORT` (default 18000), drops the cert-resolver wiring, and
+tells the orchestrator to emit `http://...:18000` origin URLs everywhere. Point `BASE_DOMAIN` at a
+wildcard that resolves to the host (e.g. `*.cvx.lan` via your local DNS or `--host-resolver-rules`
+in Chromium).
 
-The Dockerfile pulls the Convex backend binary from the official `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key` from the same git tag (FSL-1.1-Apache-2.0 permits local builds), and bundles the dashboard static export — no separate dashboard container needed. See [`docs/spike-notes.md`](docs/spike-notes.md) for the full architecture write-up.
+### Auth
+
+By default `/api/*` is **open**. The orchestrator logs a boot-time
+`WARN: ORCHESTRATOR_ADMIN_TOKEN is unset — /api/* is OPEN.` so you do not ship that config to the
+public internet by accident.
+
+Two ways to lock it down:
+
+- **Built-in bearer** — set `ORCHESTRATOR_ADMIN_TOKEN` to ≥16 characters
+  (`openssl rand -hex 32`). The UI prompts on first load, stores it in `localStorage`, and every
+  `/api/*` request goes through `timingSafeEqual` against the configured token.
+- **Reverse-proxy auth** — leave the token empty and front the orchestrator with Traefik's
+  `basicauth`, Authelia, oauth2-proxy, or Cloudflare Access. The orchestrator honors
+  `X-Forwarded-User` for audit attribution **only in open mode**; in bearer mode the audit actor
+  is always `admin` to close the spoof vector.
 
 ## Backups and Restore
 
-Each instance is backed up automatically on the orchestrator's schedule and the snapshots land in a dedicated MinIO bucket (`<instance>-backups`). Defaults:
+Each instance is backed up automatically on the orchestrator's schedule and the snapshots land in
+the per-instance `<bucketPrefix>-backups` MinIO bucket. Uploads use
+`@aws-sdk/lib-storage`'s `Upload` so very large zips stream in multipart with bounded memory.
+
+Defaults:
 
 - **Schedule**: 03:00 server-local daily (`BACKUP_DEFAULT_CRON=0 3 * * *`)
-- **Retention**: 30 days (`BACKUP_RETENTION_DAYS=30`), only applied to `source=auto` rows. Manual and pre-restore backups are kept until you delete them.
+- **Retention**: 30 days (`BACKUP_RETENTION_DAYS=30`), only applied to `source=auto` rows. Manual
+  and pre-restore backups are kept until you delete them.
 - **Concurrency**: two backups at a time across all instances (`BACKUP_MAX_CONCURRENT=2`)
-- **Storage layout**: `<instance>-backups/<instance>_<iso>_v<version>_<uuid>.zip` (Convex's own `.zip` export format, includes file storage)
-- **Health gating**: after 3 consecutive automatic failures the schedule is suspended for that instance until you re-enable it from the UI
+- **Storage layout**: `<instance>-backups/<instance>_<iso>_v<version>_<uuid>.zip` (Convex's own
+  zip export format, includes file storage)
+- **Health gating**: after `BACKUP_MAX_CONSECUTIVE_FAILURES` consecutive auto failures the
+  schedule is suspended for that instance until you re-enable it from the UI.
 
-The UI exposes:
+![Backup flow](./docs/diagrams/backup-flow.svg)
 
-- A "Backups" section on the instance detail page with `Backup now`, per-row `Download` / `Restore` / `Delete`, and a "Restore from upload…" modal for ad-hoc `.zip` imports.
-- A "Backup settings" panel for per-instance cron, retention, and the enabled toggle.
-- A "Last backup" column in the main instances list, colour-coded green / amber (> 2 d) / red (> 5 d) / stuck.
+Restore is destructive: the flow always takes a `pre-restore` backup first, then stops and
+respawns the backend before running `convex import --replace-all`. If the pre-restore step fails
+the restore is aborted before anything destructive happens.
 
-Restore is destructive: the flow always takes a `source=pre-restore` backup first, then runs `convex import --replace-all --include-file-storage` against a freshly restarted backend. If the pre-restore backup fails, the restore is aborted before anything destructive happens. All restore actions require typing the instance name as confirmation, same UX as Delete.
+![Restore flow](./docs/diagrams/restore-flow.svg)
 
-If a `convex export` hangs (the well-known `ExportInProgress` lock), the orchestrator marks the row `stuck` after `BACKUP_EXPORT_TIMEOUT_MINUTES` (default 30) and surfaces a "Force restart backend" banner. The button SIGTERMs the backend and respawns it via the supervisor, which releases the lock.
+Restore jobs are persisted to SQLite (the `restore_jobs` table). On orchestrator restart any
+in-flight job is flipped to `failed` with a marker pointing at the audit log + the pre-restore
+backup so the operator sees the real state instead of a stuck "importing" forever.
 
-See [`docs/backups.md`](docs/backups.md) for the full operator guide including off-site sync, retention tuning, and recovery playbooks.
+> **What's in a Convex backup zip:** table documents and file storage only. Environment variables,
+> schema, functions, crons, and auth config are **not** included — see
+> [Convex docs](https://docs.convex.dev/database/backup-restore). The orchestrator surfaces this
+> in the restore-confirm dialog so the operator knows to re-apply env via `npx convex env set` and
+> redeploy code via `npx convex deploy` after a restore.
 
-## Architecture
+See [`docs/backups.md`](docs/backups.md) for retention tuning, recovery playbooks, and off-site
+sync.
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  orchestrator container                                      │
-│  ┌─────────────────┐    ┌──────────────────────────────────┐ │
-│  │ Bun + Hono API  │───►│ supervised convex-backend procs  │ │
-│  │ React UI        │    │  ├─ instance-a (pid 42, 13210)   │ │
-│  │ SQLite state    │    │  ├─ instance-b (pid 51, 13220)   │ │
-│  └────────┬────────┘    │  └─ ...                          │ │
-│           │             └──────────────────────────────────┘ │
-│           │ writes dynamic.yml                               │
-└───────────┼──────────────────────────────────────────────────┘
-            ▼
-┌──────────────┐  ┌────────────────────┐  ┌──────────┐  ┌──────┐
-│   Traefik    │  │ convex-dashboard   │  │ Postgres │  │MinIO │
-│ (file prov.) │  │ (deployment        │  │ (shared, │  │(shr.)│
-│              │  │  switcher → API)   │  │ schemas) │  │      │
-└──────────────┘  └────────────────────┘  └──────────┘  └──────┘
-```
+## Instance lifecycle
 
-See [`openspec/changes/add-convex-orchestrator/design.md`](openspec/changes/add-convex-orchestrator/design.md) for the full design including decisions and trade-offs.
+![Instance lifecycle](./docs/diagrams/instance-lifecycle.svg)
+
+A backend can be `creating`, `running`, `stopped`, or `error`. The supervisor restarts a crashed
+process per `RESTART_DELAYS_MS` (1s, 5s, 30s, 60s, …) up to `MAX_RESTARTS` within a 10-minute
+window; past the budget the row flips to `error` with the last exit code in `last_error`. A
+user-initiated `stop` during the backoff window cancels the pending respawn (otherwise the
+setTimeout would silently bring the backend back up after the operator told it to stop). Delete
+requires typing the instance name as confirmation, same UX as Restore.
+
+## Documentation
+
+- **[Architecture](./docs/architecture.md)** — component model, data flow, the four diagrams in
+  one place with prose
+- **[Backups & Restore](./docs/backups.md)** — operator guide: retention tuning, force-restart-
+  backend, off-site sync, recovery playbooks
+- **[Spike notes](./docs/spike-notes.md)** — low-level engineering notes from the original spike
+  (Convex CLI flags, postgres-v5-multitenant invariants, dashboard host-header routing)
+
+The Dockerfile pulls the Convex backend binary from the official
+`get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key`
+from the same git tag (FSL-1.1-Apache-2.0 permits local builds), and bundles the dashboard static
+export — no separate dashboard container needed.
 
 ## License
 
-This project is licensed under the [Apache License 2.0](LICENSE).
-
-Convex itself is licensed under the [Functional Source License (FSL)](https://github.com/get-convex/convex-backend/blob/main/LICENSE.md), which converts to Apache 2.0 two years after each release. `convex-orchestrator` does **not** redistribute the Convex binary; the Docker build downloads the official release artifact at build time and verifies it against a pinned sha256. End users build the image themselves, so this is a wrapper, not a fork or a competing service.
-
-## Contributing
-
-Issue and PR welcome once the project is public. For now this is a single-author build-out.
+Apache License 2.0. See [LICENSE](./LICENSE).

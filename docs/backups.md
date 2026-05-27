@@ -1,12 +1,33 @@
 # Backups and restore
 
-This guide covers how `convex-orchestrator` produces per-instance snapshot backups, how restores work, and the operator playbooks for when things go sideways. For the high-level overview see the README.
+This guide covers how `convex-orchestrator` produces per-instance snapshot backups, how restores
+work, and the operator playbooks for when things go sideways. For the high-level overview see the
+README; for the engineering reference see [`architecture.md`](./architecture.md).
+
+## Backup pipeline
+
+![Backup flow](./diagrams/backup-flow.svg)
 
 ## What is in a backup
 
-A backup is a single `.zip` produced by the official `convex export --include-file-storage` CLI against the instance's deployment URL. The zip contains the full database snapshot **and** every file-storage entry. Convex guarantees the snapshot is internally consistent — i.e. the document table and the storage IDs that documents reference are taken at the same logical timestamp.
+A backup is a single `.zip` produced by the official `convex export --include-file-storage` CLI
+against the instance's deployment URL. The zip contains the full database snapshot **and** every
+file-storage entry. Convex guarantees the snapshot is internally consistent — i.e. the document
+table and the storage IDs that documents reference are taken at the same logical timestamp.
 
-`--include-file-storage` is non-negotiable. Restoring a backup that lacks file storage with `--replace-all` would delete every `_storage` entry on the deployment. The orchestrator hard-codes the flag for that reason; do not roll your own export pipeline that omits it.
+`--include-file-storage` is non-negotiable. Restoring a backup that lacks file storage with
+`--replace-all` would delete every `_storage` entry on the deployment. The orchestrator hard-codes
+the flag for that reason; do not roll your own export pipeline that omits it.
+
+**What is NOT in a Convex backup zip**, per the
+[Convex docs](https://docs.convex.dev/database/backup-restore):
+
+- **Environment variables** — re-set with `npx convex env set` after a restore
+- **Schema, functions, crons, auth config** — redeploy with `npx convex deploy`
+
+The orchestrator's restore-confirm dialog surfaces this explicitly so a user who, say, expects an
+env var change to roll back along with a restore is not surprised. Tested end-to-end against the
+NAS deployment on 2026-05-27.
 
 ## Storage layout
 
@@ -60,12 +81,24 @@ The very next scheduled or manual backup proceeds normally.
 
 ### Restoring
 
+![Restore flow](./diagrams/restore-flow.svg)
+
 Two paths, both end in the same `convex import --replace-all --include-file-storage` call:
 
 1. **From the backup list** — pick a row, click `Restore`, type the instance name to confirm.
 2. **From upload** — `Restore from upload…`, pick a `.zip`, type the instance name to confirm. The file is streamed straight to MinIO (no in-RAM buffering) and registered as a `manual-upload` backup row.
 
-Before the destructive import runs, the orchestrator takes a `pre-restore` backup. If the pre-restore step fails the whole restore is aborted with a 500 — no data is touched. Convex's import command itself enforces that the zip's `INSTANCE_NAME` matches the target deployment; a cross-instance restore attempt is rejected with a clear error and the pre-restore backup is preserved so you can roll back manually.
+Before the destructive import runs, the orchestrator takes a `pre-restore` backup. If the
+pre-restore step fails the whole restore is aborted with a 500 — no data is touched. Convex's
+import command itself enforces that the zip's `INSTANCE_NAME` matches the target deployment; a
+cross-instance restore attempt is rejected with a clear error and the pre-restore backup is
+preserved so you can roll back manually.
+
+Restore jobs are persisted to SQLite (the `restore_jobs` table) so polling survives an
+orchestrator restart. On boot, any job not in `{complete, failed}` is flipped to `failed` with a
+marker message pointing at the audit log and the corresponding `pre-restore` backup ID; the
+operator then decides whether to roll back or retry. Without this, every restart turned in-flight
+polls into a generic 404 indistinguishable from "you typo'd the id".
 
 ### Manual recovery from a `pre-restore` row
 

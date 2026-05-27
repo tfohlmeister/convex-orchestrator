@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>convex-orchestrator · Architecture</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #f5f4ed;
+        --color-ink: #0b0d0b;
+        --color-muted: #52534e;
+        --color-soft: #65655c;
+        --color-accent: #f7591f;
+        --color-link: #1a70c7;
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', serif;
+        --font-mono: 'Geist Mono', ui-monospace, monospace;
+      }
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .frame {
+        max-width: 1240px;
+        width: 100%;
+      }
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 0.4rem;
+      }
+      .subtitle {
+        font-family: var(--font-sans);
+        font-size: 0.95rem;
+        font-weight: 400;
+        color: var(--color-muted);
+        margin-bottom: 1.75rem;
+        max-width: 64ch;
+        line-height: 1.45;
+      }
+      svg {
+        width: 100%;
+        min-width: 1000px;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Architecture · convex-orchestrator</p>
+      <h1>One container, N self-hosted Convex backends, one dashboard</h1>
+      <p class="subtitle">
+        The orchestrator supervises one convex-backend process per instance and writes the Traefik
+        file-provider routing. Backends share Postgres (postgres-v5-multitenant) and MinIO with
+        per-instance bucket prefixes. The bundled Convex dashboard receives credentials via
+        postMessage, no separate container needed.
+      </p>
+
+      <svg viewBox="0 0 1080 600" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="rgba(11,13,11,0.10)" />
+          </pattern>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#52534e" />
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f7591f" />
+          </marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#1a70c7" />
+          </marker>
+        </defs>
+
+        <!-- Background -->
+        <rect width="100%" height="100%" fill="#f5f4ed" />
+        <rect width="100%" height="100%" fill="url(#dots)" opacity="0.6" />
+
+        <!-- ============== ARROWS (drawn first so boxes sit on top) ============== -->
+
+        <!-- Browser → Traefik (HTTPS) -->
+        <line x1="148" y1="280" x2="208" y2="280" stroke="#1a70c7" stroke-width="1.2"
+              marker-end="url(#arrow-link)" />
+        <rect x="158" y="260" width="40" height="12" rx="2" fill="#f5f4ed" />
+        <text x="178" y="269" fill="#1a70c7" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">HTTPS</text>
+
+        <!-- Traefik → orchestrator API (host: orchestrator.<base> + dashboard.<base>) -->
+        <line x1="328" y1="260" x2="408" y2="220" stroke="#1a70c7" stroke-width="1.2"
+              marker-end="url(#arrow-link)" />
+        <rect x="338" y="226" width="62" height="12" rx="2" fill="#f5f4ed" />
+        <text x="369" y="235" fill="#1a70c7" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">UI · DASH</text>
+
+        <!-- Traefik → supervised backends (host: <name>.<base>) -->
+        <line x1="328" y1="300" x2="624" y2="220" stroke="#1a70c7" stroke-width="1.2"
+              marker-end="url(#arrow-link)" />
+        <rect x="468" y="244" width="60" height="12" rx="2" fill="#f5f4ed" />
+        <text x="498" y="253" fill="#1a70c7" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">*.BASE</text>
+
+        <!-- API → SQLite (writes state) -->
+        <line x1="488" y1="246" x2="488" y2="356" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="468" y="292" width="40" height="12" rx="2" fill="#f5f4ed" />
+        <text x="488" y="301" fill="#65655c" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">STATE</text>
+
+        <!-- API → supervised backends (spawns + monitors) -->
+        <line x1="568" y1="200" x2="624" y2="200" stroke="#f7591f" stroke-width="1.4"
+              marker-end="url(#arrow-accent)" />
+        <rect x="572" y="180" width="50" height="12" rx="2" fill="#f5f4ed" />
+        <text x="597" y="189" fill="#f7591f" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">SPAWN</text>
+
+        <!-- API → dynamic.yml (writes file-provider config) -->
+        <line x1="488" y1="246" x2="488" y2="492" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" marker-end="url(#arrow)" />
+
+        <!-- dynamic.yml → Traefik (file provider reads) -->
+        <path d="M 408 504 Q 280 504 268 320" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" fill="none" marker-end="url(#arrow)" />
+        <rect x="276" y="380" width="56" height="12" rx="2" fill="#f5f4ed" />
+        <text x="304" y="389" fill="#65655c" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">FILE PROV</text>
+
+        <!-- Backends → Postgres -->
+        <line x1="828" y1="184" x2="908" y2="184" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="842" y="164" width="52" height="12" rx="2" fill="#f5f4ed" />
+        <text x="868" y="173" fill="#65655c" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">PG · MT</text>
+
+        <!-- Backends → MinIO -->
+        <line x1="828" y1="216" x2="908" y2="296" stroke="#52534e" stroke-width="1"
+              marker-end="url(#arrow)" />
+        <rect x="840" y="246" width="56" height="12" rx="2" fill="#f5f4ed" />
+        <text x="868" y="255" fill="#65655c" font-size="8" font-family="'Geist Mono', monospace"
+              text-anchor="middle" letter-spacing="0.08em">S3 · PFX</text>
+
+        <!-- Dashboard postMessage → backend (credentials handoff, dashed) -->
+        <path d="M 488 246 Q 540 280 624 216" stroke="#52534e" stroke-width="1"
+              stroke-dasharray="5,4" fill="none" marker-end="url(#arrow)" />
+
+        <!-- ============== NODES ============== -->
+
+        <!-- Browser (input) -->
+        <rect x="28" y="240" width="120" height="80" rx="6" fill="#f5f4ed" />
+        <rect x="28" y="240" width="120" height="80" rx="6"
+              fill="rgba(82,83,78,0.10)" stroke="#65655c" stroke-width="1" />
+        <rect x="36" y="246" width="44" height="12" rx="2" fill="transparent"
+              stroke="rgba(101,101,92,0.40)" stroke-width="0.8" />
+        <text x="58" y="255" fill="rgba(101,101,92,0.85)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">USER</text>
+        <text x="88" y="288" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">Browser</text>
+        <text x="88" y="304" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">operator + dashboard</text>
+
+        <!-- Traefik (proxy) -->
+        <rect x="208" y="240" width="120" height="80" rx="6" fill="#f5f4ed" />
+        <rect x="208" y="240" width="120" height="80" rx="6"
+              fill="rgba(11,13,11,0.03)" stroke="rgba(11,13,11,0.30)" stroke-width="1" />
+        <rect x="216" y="246" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.30)" stroke-width="0.8" />
+        <text x="244" y="255" fill="rgba(11,13,11,0.55)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PROXY</text>
+        <text x="268" y="288" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">Traefik</text>
+        <text x="268" y="304" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">file provider</text>
+
+        <!-- ============== Orchestrator container boundary ============== -->
+        <rect x="384" y="116" width="424" height="412" rx="8" fill="none"
+              stroke="#f7591f" stroke-width="1.2" stroke-dasharray="6,5" />
+        <rect x="404" y="108" width="184" height="16" rx="2" fill="#f5f4ed" />
+        <text x="496" y="121" fill="#f7591f" font-size="8"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.16em">
+          ORCHESTRATOR CONTAINER
+        </text>
+
+        <!-- Hono API + UI + bundled dashboard (focal #1) -->
+        <rect x="408" y="140" width="160" height="80" rx="6" fill="#f5f4ed" />
+        <rect x="408" y="140" width="160" height="80" rx="6"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <rect x="416" y="146" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(247,89,31,0.55)" stroke-width="0.8" />
+        <text x="440" y="155" fill="#f7591f" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">HONO</text>
+        <text x="488" y="184" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">API + UI + dashboard</text>
+        <text x="488" y="200" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">Bun · React · :8080</text>
+
+        <!-- Supervised convex-backend processes (focal #2) -->
+        <rect x="624" y="140" width="160" height="80" rx="6" fill="#f5f4ed" />
+        <rect x="624" y="140" width="160" height="80" rx="6"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <rect x="632" y="146" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(247,89,31,0.55)" stroke-width="0.8" />
+        <text x="660" y="155" fill="#f7591f" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">PROCS</text>
+        <text x="704" y="180" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">convex-backend × N</text>
+        <text x="704" y="196" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">one per instance</text>
+        <text x="704" y="208" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">13210, 13220, …</text>
+
+        <!-- SQLite (state) -->
+        <rect x="408" y="356" width="160" height="64" rx="6" fill="#f5f4ed" />
+        <rect x="408" y="356" width="160" height="64" rx="6"
+              fill="rgba(11,13,11,0.05)" stroke="#52534e" stroke-width="1" />
+        <rect x="416" y="362" width="48" height="12" rx="2" fill="transparent"
+              stroke="rgba(82,83,78,0.40)" stroke-width="0.8" />
+        <text x="440" y="371" fill="rgba(82,83,78,0.90)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">STATE</text>
+        <text x="488" y="392" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">SQLite</text>
+        <text x="488" y="408" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">instances, samples, backups</text>
+
+        <!-- dynamic.yml writer (output) -->
+        <rect x="408" y="476" width="380" height="40" rx="6" fill="#f5f4ed" />
+        <rect x="408" y="476" width="380" height="40" rx="6"
+              fill="rgba(11,13,11,0.03)" stroke="rgba(11,13,11,0.30)" stroke-width="1"
+              stroke-dasharray="4,3" />
+        <rect x="416" y="482" width="56" height="12" rx="2" fill="transparent"
+              stroke="rgba(11,13,11,0.30)" stroke-width="0.8" />
+        <text x="444" y="491" fill="rgba(11,13,11,0.55)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">OUTPUT</text>
+        <text x="598" y="502" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">dynamic.yml</text>
+        <text x="598" y="514" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">per-instance routes (atomic)</text>
+
+        <!-- Postgres (external store) -->
+        <rect x="908" y="148" width="140" height="72" rx="6" fill="#f5f4ed" />
+        <rect x="908" y="148" width="140" height="72" rx="6"
+              fill="rgba(11,13,11,0.05)" stroke="#52534e" stroke-width="1" />
+        <rect x="916" y="154" width="52" height="12" rx="2" fill="transparent"
+              stroke="rgba(82,83,78,0.40)" stroke-width="0.8" />
+        <text x="942" y="163" fill="rgba(82,83,78,0.90)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">STORE</text>
+        <text x="978" y="190" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">Postgres</text>
+        <text x="978" y="206" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">shared, multitenant</text>
+
+        <!-- MinIO (external store) -->
+        <rect x="908" y="264" width="140" height="72" rx="6" fill="#f5f4ed" />
+        <rect x="908" y="264" width="140" height="72" rx="6"
+              fill="rgba(11,13,11,0.05)" stroke="#52534e" stroke-width="1" />
+        <rect x="916" y="270" width="52" height="12" rx="2" fill="transparent"
+              stroke="rgba(82,83,78,0.40)" stroke-width="0.8" />
+        <text x="942" y="279" fill="rgba(82,83,78,0.90)" font-size="7"
+              font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.10em">STORE</text>
+        <text x="978" y="306" fill="#0b0d0b" font-size="12" font-weight="600"
+              font-family="'Geist', sans-serif" text-anchor="middle">MinIO</text>
+        <text x="978" y="322" fill="#65655c" font-size="9"
+              font-family="'Geist Mono', monospace" text-anchor="middle">shared, bucket prefix</text>
+
+        <!-- ============== Legend ============== -->
+        <line x1="32" y1="556" x2="1048" y2="556"
+              stroke="rgba(11,13,11,0.10)" stroke-width="0.8" />
+        <text x="32" y="574" fill="#52534e" font-size="8"
+              font-family="'Geist Mono', monospace" letter-spacing="0.16em">LEGEND</text>
+
+        <!-- focal -->
+        <rect x="116" y="565" width="14" height="10" rx="2"
+              fill="rgba(247,89,31,0.08)" stroke="#f7591f" stroke-width="1" />
+        <text x="136" y="574" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">focal · what the orchestrator owns</text>
+
+        <!-- store -->
+        <rect x="376" y="565" width="14" height="10" rx="2"
+              fill="rgba(11,13,11,0.05)" stroke="#52534e" stroke-width="1" />
+        <text x="396" y="574" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">store</text>
+
+        <!-- HTTP -->
+        <line x1="456" y1="570" x2="488" y2="570"
+              stroke="#1a70c7" stroke-width="1.2" />
+        <text x="494" y="574" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">HTTP / public traffic</text>
+
+        <!-- internal -->
+        <line x1="676" y1="570" x2="708" y2="570"
+              stroke="#52534e" stroke-width="1" />
+        <text x="714" y="574" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">internal call</text>
+
+        <!-- dashed -->
+        <line x1="844" y1="570" x2="876" y2="570"
+              stroke="#52534e" stroke-width="1" stroke-dasharray="5,4" />
+        <text x="882" y="574" fill="#52534e" font-size="9"
+              font-family="'Geist Mono', monospace">async / file watch</text>
+      </svg>
+    </div>
+  </body>
+</html>
