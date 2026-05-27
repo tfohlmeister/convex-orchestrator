@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, access } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -483,6 +483,120 @@ describe('integration: stuck export detection (task 10.4)', () => {
     ).deps.forceRestartBackend;
     await cb('inst-a', 'tester');
     expect(harness.orchestratorStub.restarts).toEqual(['inst-a']);
+  });
+});
+
+describe('integration: startRestoreFromUpload (task 10.5)', () => {
+  // Helper: write a small file the upload path will stream into MinIO.
+  // Embed the same `instance=<name>` marker the mock CLI's import mode
+  // checks for, otherwise the chained restore-from-backup step would
+  // reject the zip as a wrong-instance import.
+  async function makeLocalZip(instance = 'inst-a'): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'orch-upload-'));
+    const path = join(dir, 'upload.zip');
+    await writeFile(path, Buffer.from(`FAKE-CONVEX-EXPORT instance=${instance} payload=upload\n`));
+    return path;
+  }
+
+  // Helper: does the file still exist on disk?
+  async function exists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  test('happy path: creates manual-upload backup row, uploads to MinIO, chains into restore', async () => {
+    harness = await setupHarness();
+    const zip = await makeLocalZip();
+    const jobId = await harness.restore.startRestoreFromUpload(
+      harness.instance.name,
+      zip,
+      'upload-actor',
+    );
+    expect(jobId).toBeTruthy();
+    const job = await waitForRestoreJob(harness.restore, jobId);
+    expect(job.status).toBe('complete');
+
+    // There should be exactly one manual-upload row and one pre-restore
+    // row in the backups table.
+    const all = harness.backups.recentFor('inst-a', 10);
+    expect(all.some((b) => b.source === 'manual-upload' && b.status === 'complete')).toBe(true);
+    expect(all.some((b) => b.source === 'pre-restore' && b.status === 'complete')).toBe(true);
+
+    // The uploaded body sits in the right MinIO bucket under a
+    // `upload-…` key prefix. The pre-restore backup also lands in this
+    // bucket but with a different key shape (`<instance>_<iso>_v…`), so
+    // filtering by `upload-` prefix isolates the manual-upload bytes.
+    const bucket = harness.minio._store.get('inst-a-backups')!;
+    const allKeys = Array.from(bucket.keys());
+    const uploadKeys = allKeys.filter((k) => k.startsWith('upload-'));
+    expect(uploadKeys.length).toBeGreaterThanOrEqual(1);
+    expect(bucket.get(uploadKeys[0]!)!.body.toString()).toContain('instance=inst-a');
+
+    // The audit log records the orchestrator's view of the upload.
+    const audit = harness.audit.recentFor('inst-a', 30);
+    expect(audit.some((a) => a.action === 'backup_uploaded')).toBe(true);
+
+    // Local tempfile is unlinked by the finally{} block — checking
+    // existence raises ENOENT.
+    expect(await exists(zip)).toBe(false);
+  }, 30_000);
+
+  test('unknown instance: 404 before any disk or MinIO work', async () => {
+    harness = await setupHarness();
+    const zip = await makeLocalZip();
+    let caught: unknown;
+    try {
+      await harness.restore.startRestoreFromUpload('does-not-exist', zip, 'upload-actor');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toMatchObject({ status: 404, code: 'NOT_FOUND' });
+    // The local file should still be on disk — the route's pipeline
+    // owns the cleanup of the tmpPath it wrote; the manager is only
+    // responsible for the path it itself was handed once we get past
+    // the existence check.
+    expect(await exists(zip)).toBe(true);
+    await rm(zip, { force: true });
+  });
+
+  test('upload failure: row flips to failed with errorMessage, tmp file unlinked, error surfaces', async () => {
+    harness = await setupHarness();
+    const zip = await makeLocalZip();
+    // Force the MinIO putBackup to reject; mimics S3 connectivity loss
+    // mid-stream. The manager has to (a) flip the backup row to failed,
+    // (b) unlink the local tmpfile, (c) throw UPLOAD_FAILED to the caller.
+    const minio = harness.minio as unknown as { putBackup: typeof harness.minio.putBackup };
+    const original = minio.putBackup;
+    minio.putBackup = async () => {
+      throw new Error('s3 connection refused');
+    };
+
+    let caught: unknown;
+    try {
+      await harness.restore.startRestoreFromUpload(harness.instance.name, zip, 'upload-actor');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toMatchObject({ status: 500, code: 'UPLOAD_FAILED' });
+
+    // Restore the original so afterEach's cleanup doesn't trip.
+    minio.putBackup = original;
+
+    // The backup row should exist and be in `failed` with an error
+    // message — never silently succeed.
+    const all = harness.backups.recentFor('inst-a', 10);
+    const uploadRow = all.find((b) => b.source === 'manual-upload');
+    expect(uploadRow).toBeTruthy();
+    expect(uploadRow!.status).toBe('failed');
+    expect(uploadRow!.errorMessage).toMatch(/s3 connection refused/i);
+    expect(uploadRow!.completedAt).not.toBeNull();
+
+    // tmpfile cleanup happens in the finally{} branch even on failure.
+    expect(await exists(zip)).toBe(false);
   });
 });
 
