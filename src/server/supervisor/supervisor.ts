@@ -3,10 +3,12 @@ import { decideRestart, type BackoffState } from './watcher.ts';
 import { gracefulStop, stopAll } from './shutdown.ts';
 import { ResourceSampler, type ResourceSink } from './resources.ts';
 import type { Instance } from './types.ts';
+import type { Logger } from '../logger.ts';
 
 export interface SupervisorDeps {
   binaryPath: string;
   logDir: string;
+  logger: Logger;
   databaseUrl: (instance: Instance) => string;
   s3: {
     endpoint: string;
@@ -118,6 +120,17 @@ export class Supervisor {
       bindAddress: this.deps.bindAddress,
       externalScheme: this.deps.externalScheme,
       externalPortSuffix: this.deps.externalPortSuffix,
+      // Without this hook, log-pipe failures (disk full, IO error,
+      // backpressure) used to disappear as unhandled rejections; the
+      // backend kept running but its stdout/stderr was no longer
+      // captured. Surface them through the supervisor's logger so an
+      // operator can see "logs went dark" without grepping process
+      // state.
+      onPipeError: (stream, err) =>
+        this.deps.logger.error(
+          { instance: instance.name, stream, err: err.message },
+          'log pipe died',
+        ),
     });
 
     const tracked: Tracked = {

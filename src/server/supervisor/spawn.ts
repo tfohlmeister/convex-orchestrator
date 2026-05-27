@@ -74,8 +74,12 @@ export async function spawnConvex(cfg: SpawnConfig): Promise<SpawnHandle> {
     stdin: 'ignore',
   });
 
-  void pipeToLog(proc.stdout as ReadableStream<Uint8Array>, stdoutLog);
-  void pipeToLog(proc.stderr as ReadableStream<Uint8Array>, stderrLog);
+  pipeToLog(proc.stdout as ReadableStream<Uint8Array>, stdoutLog).catch((err: unknown) => {
+    cfg.onPipeError?.('stdout', err instanceof Error ? err : new Error(String(err)));
+  });
+  pipeToLog(proc.stderr as ReadableStream<Uint8Array>, stderrLog).catch((err: unknown) => {
+    cfg.onPipeError?.('stderr', err instanceof Error ? err : new Error(String(err)));
+  });
 
   return {
     proc,

@@ -58,4 +58,8 @@ export interface SpawnConfig {
   bindAddress: string;
   externalScheme: 'http' | 'https';
   externalPortSuffix: string;
+  // Notified when stdout/stderr piping into the RotatingLog fails. Used
+  // by the supervisor to log "logs went dark" so the operator sees the
+  // failure instead of the orchestrator just losing the stream silently.
+  onPipeError?: (stream: 'stdout' | 'stderr', err: Error) => void;
 }

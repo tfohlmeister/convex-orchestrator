@@ -9,9 +9,21 @@ export class RotatingLog {
   private stream: WriteStream | null = null;
   private bytesWritten = 0;
   private readyPromise: Promise<void>;
+  // Sticky error from the underlying WriteStream. Without this an EIO
+  // / ENOSPC on the stream would emit an uncaught 'error' event and
+  // (depending on Bun/Node version) crash the orchestrator. We capture
+  // it and surface it to the next write() call so the caller's
+  // onPipeError fires and the log pipeline tears down cleanly.
+  private streamError: Error | null = null;
 
   constructor(private readonly path: string) {
     this.readyPromise = this.init();
+  }
+
+  private attachStreamErrorHandler(s: WriteStream): void {
+    s.on('error', (err: Error) => {
+      this.streamError = err;
+    });
   }
 
   private async init(): Promise<void> {
@@ -23,6 +35,7 @@ export class RotatingLog {
       this.bytesWritten = 0;
     }
     this.stream = createWriteStream(this.path, { flags: 'a' });
+    this.attachStreamErrorHandler(this.stream);
   }
 
   async ready(): Promise<void> {
@@ -31,6 +44,7 @@ export class RotatingLog {
 
   async write(chunk: Buffer | string): Promise<void> {
     await this.ready();
+    if (this.streamError) throw this.streamError;
     const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
     if (this.bytesWritten + buf.byteLength > ROTATE_BYTES) {
       await this.rotate();
@@ -62,6 +76,7 @@ export class RotatingLog {
       }
     }
     this.stream = createWriteStream(this.path, { flags: 'a' });
+    this.attachStreamErrorHandler(this.stream);
     this.bytesWritten = 0;
   }
 

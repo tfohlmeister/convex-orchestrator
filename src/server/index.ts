@@ -84,6 +84,7 @@ export async function bootstrap(): Promise<void> {
   const supervisor = new Supervisor({
     binaryPath: config.CONVEX_BINARY,
     logDir: config.LOG_DIR,
+    logger,
     databaseUrl: () => postgres.databaseUrlForInstance(config.POSTGRES_CLUSTER_URL),
     s3: {
       endpoint: config.S3_ENDPOINT,
