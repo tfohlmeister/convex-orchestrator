@@ -112,7 +112,12 @@ ARG CONVEX_CLI_VERSION=1.18.2
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl tini libpq5 nodejs npm \
     && npm install -g --no-fund --no-audit "convex@${CONVEX_CLI_VERSION}" \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
+    && rm -rf /var/lib/apt/lists/* /root/.npm \
+    # `convex export` runs ensureHasConvexDependency which insists on a
+    # package.json that lists `convex` as a dep — even in self-hosted
+    # --url/--admin-key mode. Stub one out and spawn from this cwd.
+    && mkdir -p /convex-cli-cwd \
+    && printf '{"name":"orchestrator-convex-cli","private":true,"version":"0.0.0","dependencies":{"convex":"%s"}}\n' "${CONVEX_CLI_VERSION}" > /convex-cli-cwd/package.json
 
 WORKDIR /app
 COPY --from=convex-backend-bin /out/convex-local-backend /convex/convex-local-backend
@@ -130,7 +135,8 @@ ENV HTTP_PORT=8080 \
     CONVEX_BINARY=/convex/convex-local-backend \
     GENERATE_KEY_BINARY=/convex/generate_key \
     CONVEX_CLI=convex \
-    BACKUP_WORK_DIR=/var/lib/orchestrator/backup-work
+    BACKUP_WORK_DIR=/var/lib/orchestrator/backup-work \
+    CONVEX_CLI_CWD=/convex-cli-cwd
 
 EXPOSE 8080
 

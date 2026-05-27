@@ -62,7 +62,16 @@ export async function runExport(args: RunExportArgs): Promise<RunExportResult> {
     deploymentUrl: args.deploymentUrl,
     adminKey: args.adminKey,
     timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    cliArgs: ['export', '--include-file-storage', '--path', args.outputPath],
+    cliArgs: [
+      'export',
+      '--url',
+      args.deploymentUrl,
+      '--admin-key',
+      args.adminKey,
+      '--include-file-storage',
+      '--path',
+      args.outputPath,
+    ],
     onLog: args.onLog,
   });
 
@@ -89,7 +98,20 @@ export async function runImport(args: RunImportArgs): Promise<RunImportResult> {
     deploymentUrl: args.deploymentUrl,
     adminKey: args.adminKey,
     timeoutMs: args.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    cliArgs: ['import', '--replace-all', '--include-file-storage', args.inputPath],
+    cliArgs: [
+      'import',
+      '--url',
+      args.deploymentUrl,
+      '--admin-key',
+      args.adminKey,
+      '--replace-all',
+      // Storage is auto-detected from the zip contents — there is no
+      // --include-file-storage flag on import. -y skips the destructive
+      // confirmation prompt (we already gated on the orchestrator's own
+      // "type instance name" confirm-dialog upstream).
+      '-y',
+      args.inputPath,
+    ],
     onLog: args.onLog,
   });
 }
@@ -115,17 +137,23 @@ interface SpawnResult {
 
 function runConvex(args: SpawnArgs): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    // Convex CLI ships with its own --yes prompt-suppression mode; we always
-    // run non-interactively. CI=1 also disables their analytics prompt.
+    // CI=1 disables convex CLI's analytics prompt and any TTY-only
+    // niceties. The CLI has no --yes flag (it auto-confirms when stdin
+    // isn't a TTY, which it isn't here).
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       CONVEX_SELF_HOSTED_URL: args.deploymentUrl,
       CONVEX_SELF_HOSTED_ADMIN_KEY: args.adminKey,
       CI: '1',
     };
-    const fullArgs = [...args.cliArgs, '--yes'];
-    const proc = spawn(args.cli, fullArgs, {
+    // Run from a directory that contains a stub package.json with `convex`
+    // in dependencies — the CLI runs `ensureHasConvexDependency` even in
+    // self-hosted --url/--admin-key mode (Convex CLI 1.18.2). Falls back
+    // to cwd when CONVEX_CLI_CWD isn't set (dev outside docker).
+    const cwd = process.env.CONVEX_CLI_CWD ?? process.cwd();
+    const proc = spawn(args.cli, args.cliArgs, {
       env,
+      cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

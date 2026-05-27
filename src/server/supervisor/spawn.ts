@@ -38,6 +38,12 @@ export async function spawnConvex(cfg: SpawnConfig): Promise<SpawnHandle> {
     AWS_SECRET_ACCESS_KEY: cfg.s3SecretKey,
     AWS_REGION: cfg.s3Region,
     AWS_S3_FORCE_PATH_STYLE: 'true',
+    // MinIO doesn't ship with a KMS, so Convex's default SSE-KMS multipart
+    // uploads fail with "NotImplemented: Server side encryption specified
+    // but KMS is not configured". Disable SSE entirely — at-rest encryption
+    // for the MinIO volume is a separate concern (host fs encryption,
+    // MinIO_KMS_AUTO_ENCRYPTION, etc.) and not the orchestrator's call.
+    AWS_S3_DISABLE_SSE: 'true',
     DISABLE_BEACON: 'true',
     RUST_LOG: process.env.CONVEX_RUST_LOG ?? 'info',
   };
