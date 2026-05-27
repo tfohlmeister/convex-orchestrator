@@ -603,6 +603,131 @@ export interface AuditEntry {
   details?: string | null;
 }
 
+// Persisted view of an in-progress or completed restore. RestoreManager
+// writes here on every state transition so a poll after orchestrator
+// restart returns the last known state instead of a misleading 404.
+export type RestoreJobStatus =
+  | 'queued'
+  | 'pre-backup'
+  | 'stopping'
+  | 'starting'
+  | 'importing'
+  | 'complete'
+  | 'failed';
+
+export interface PersistedRestoreJob {
+  id: string;
+  instanceName: string;
+  sourceBackupId: string;
+  preRestoreBackupId: string | null;
+  status: RestoreJobStatus;
+  error: string | null;
+  startedAt: number;
+  completedAt: number | null;
+}
+
+interface RestoreJobRow {
+  id: string;
+  instance_name: string;
+  source_backup_id: string;
+  pre_restore_backup_id: string | null;
+  status: RestoreJobStatus;
+  error: string | null;
+  started_at: number;
+  completed_at: number | null;
+}
+
+function rowToRestoreJob(r: RestoreJobRow): PersistedRestoreJob {
+  return {
+    id: r.id,
+    instanceName: r.instance_name,
+    sourceBackupId: r.source_backup_id,
+    preRestoreBackupId: r.pre_restore_backup_id,
+    status: r.status,
+    error: r.error,
+    startedAt: r.started_at,
+    completedAt: r.completed_at,
+  };
+}
+
+export class RestoreJobRepo {
+  constructor(private readonly db: DB) {}
+
+  insert(j: PersistedRestoreJob): void {
+    this.db
+      .prepare(
+        `INSERT INTO restore_jobs (
+          id, instance_name, source_backup_id, pre_restore_backup_id,
+          status, error, started_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        j.id,
+        j.instanceName,
+        j.sourceBackupId,
+        j.preRestoreBackupId,
+        j.status,
+        j.error,
+        j.startedAt,
+        j.completedAt,
+      );
+  }
+
+  update(
+    id: string,
+    fields: {
+      status?: RestoreJobStatus;
+      preRestoreBackupId?: string | null;
+      error?: string | null;
+      completedAt?: number | null;
+    },
+  ): void {
+    const sets: string[] = [];
+    const args: (string | number | null)[] = [];
+    if (fields.status !== undefined) {
+      sets.push('status = ?');
+      args.push(fields.status);
+    }
+    if (fields.preRestoreBackupId !== undefined) {
+      sets.push('pre_restore_backup_id = ?');
+      args.push(fields.preRestoreBackupId);
+    }
+    if (fields.error !== undefined) {
+      sets.push('error = ?');
+      args.push(fields.error);
+    }
+    if (fields.completedAt !== undefined) {
+      sets.push('completed_at = ?');
+      args.push(fields.completedAt);
+    }
+    if (sets.length === 0) return;
+    args.push(id);
+    this.db.prepare(`UPDATE restore_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...args);
+  }
+
+  get(id: string): PersistedRestoreJob | null {
+    const row = this.db
+      .query<RestoreJobRow, [string]>('SELECT * FROM restore_jobs WHERE id = ?')
+      .get(id);
+    return row ? rowToRestoreJob(row) : null;
+  }
+
+  // Used on orchestrator boot to flip any `running` (status not in
+  // {complete, failed}) jobs to `failed` with an orchestrator-restart
+  // marker, so the UI shows the truth instead of a stuck "importing"
+  // forever.
+  markInFlightAsFailed(reason: string, at: number): number {
+    const result = this.db
+      .prepare(
+        `UPDATE restore_jobs
+         SET status = 'failed', error = ?, completed_at = ?
+         WHERE status NOT IN ('complete', 'failed')`,
+      )
+      .run(reason, at);
+    return Number(result.changes);
+  }
+}
+
 export class AuditRepo {
   constructor(private readonly db: DB) {}
 

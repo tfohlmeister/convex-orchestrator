@@ -12,6 +12,7 @@ import {
   InstanceRepo,
   PortRepo,
   ResourceSampleRepo,
+  RestoreJobRepo,
   StorageSampleRepo,
 } from './db/repos.ts';
 import { BackupManager } from './backups/manager.ts';
@@ -41,6 +42,17 @@ export async function bootstrap(): Promise<void> {
   const storage = new StorageSampleRepo(db);
   const audit = new AuditRepo(db);
   const backups = new BackupRepo(db);
+  const restoreJobs = new RestoreJobRepo(db);
+  // Any restore job that was mid-flight at last shutdown is now
+  // unreachable from RestoreManager (the in-memory cache reset). Flip
+  // them to 'failed' so the UI doesn't show a stuck "importing" forever.
+  const recovered = restoreJobs.markInFlightAsFailed(
+    'orchestrator restarted before restore job completed; check audit log + the pre-restore backup for the rollback point',
+    Date.now(),
+  );
+  if (recovered > 0) {
+    logger.warn({ recovered }, 'marked in-flight restore jobs failed after restart');
+  }
   logger.info({ clkTck: getClkTck() }, 'resolved CLK_TCK for CPU sample derivation');
 
   if (config.ORCHESTRATOR_ADMIN_TOKEN.length === 0) {
@@ -119,6 +131,7 @@ export async function bootstrap(): Promise<void> {
     logger,
     instances,
     backups,
+    restoreJobs,
     audit,
     minio,
     orchestrator,

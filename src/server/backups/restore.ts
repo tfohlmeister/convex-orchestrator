@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { Logger } from '../logger.ts';
 import type { Config } from '../config.ts';
-import type { AuditRepo, BackupRepo, InstanceRepo, Backup } from '../db/repos.ts';
+import type { AuditRepo, BackupRepo, InstanceRepo, Backup, RestoreJobRepo } from '../db/repos.ts';
 import type { MinioStorage } from '../storage/minio.ts';
 import type { Orchestrator } from '../orchestrator.ts';
 import type { BackupManager } from './manager.ts';
@@ -37,6 +37,7 @@ export interface RestoreManagerDeps {
   logger: Logger;
   instances: InstanceRepo;
   backups: BackupRepo;
+  restoreJobs: RestoreJobRepo;
   audit: AuditRepo;
   minio: MinioStorage;
   orchestrator: Orchestrator;
@@ -45,12 +46,28 @@ export interface RestoreManagerDeps {
 }
 
 export class RestoreManager {
+  // Hot cache for jobs created in this process. On a poll for a job not
+  // in the cache we fall back to the persisted row, which survives
+  // orchestrator restarts.
   private jobs = new Map<string, RestoreJob>();
 
   constructor(private readonly deps: RestoreManagerDeps) {}
 
   getJob(id: string): RestoreJob | null {
-    return this.jobs.get(id) ?? null;
+    const live = this.jobs.get(id);
+    if (live) return live;
+    const persisted = this.deps.restoreJobs.get(id);
+    if (!persisted) return null;
+    return {
+      id: persisted.id,
+      instanceName: persisted.instanceName,
+      sourceBackupId: persisted.sourceBackupId,
+      preRestoreBackupId: persisted.preRestoreBackupId,
+      status: persisted.status,
+      error: persisted.error,
+      startedAt: persisted.startedAt,
+      completedAt: persisted.completedAt,
+    };
   }
 
   // Streams an uploaded `.zip` into MinIO, registers it as a manual-upload
@@ -155,6 +172,7 @@ export class RestoreManager {
       completedAt: null,
     };
     this.jobs.set(id, job);
+    this.deps.restoreJobs.insert(job);
     void this.runRestore(job, actor).catch((err: unknown) => {
       this.deps.logger.error(
         { id, name: instanceName, err: err instanceof Error ? err.message : String(err) },
@@ -186,6 +204,7 @@ export class RestoreManager {
 
     // 1) Pre-restore backup. Blocks until complete or fails the restore.
     job.status = 'pre-backup';
+    this.deps.restoreJobs.update(job.id, { status: 'pre-backup' });
     let preBackup: Backup;
     try {
       preBackup = await this.deps.backupManager.runPreRestoreBackup(inst, actor);
@@ -194,6 +213,7 @@ export class RestoreManager {
       return;
     }
     job.preRestoreBackupId = preBackup.id;
+    this.deps.restoreJobs.update(job.id, { preRestoreBackupId: preBackup.id });
 
     // 2) Download the source zip to a local temp file. Convex CLI imports
     // from a local path; the orchestrator must materialize the zip first.
@@ -211,9 +231,11 @@ export class RestoreManager {
     // 3) Stop + restart the backend fresh. This clears any in-flight export
     // locks and gives `convex import --replace-all` a clean target.
     job.status = 'stopping';
+    this.deps.restoreJobs.update(job.id, { status: 'stopping' });
     try {
       await this.deps.orchestrator.stop(job.instanceName, actor);
       job.status = 'starting';
+      this.deps.restoreJobs.update(job.id, { status: 'starting' });
       await this.deps.orchestrator.start(job.instanceName, actor);
     } catch (err: unknown) {
       this.fail(job, `backend stop/start failed: ${errMsg(err)}`);
@@ -228,6 +250,7 @@ export class RestoreManager {
     // we stored the instance secret + key at create time and the same
     // backend identity comes up.
     job.status = 'importing';
+    this.deps.restoreJobs.update(job.id, { status: 'importing' });
     const imp = await runImport({
       deploymentUrl: `http://${this.deps.internalHost}:${inst.cloudPort}`,
       adminKey: inst.adminKey,
@@ -247,6 +270,10 @@ export class RestoreManager {
 
     job.status = 'complete';
     job.completedAt = Date.now();
+    this.deps.restoreJobs.update(job.id, {
+      status: 'complete',
+      completedAt: job.completedAt,
+    });
     this.deps.audit.record({
       at: job.completedAt,
       actor,
@@ -264,6 +291,11 @@ export class RestoreManager {
     job.status = 'failed';
     job.error = message;
     job.completedAt = Date.now();
+    this.deps.restoreJobs.update(job.id, {
+      status: 'failed',
+      error: message,
+      completedAt: job.completedAt,
+    });
     this.deps.audit.record({
       at: job.completedAt,
       actor: 'restore-manager',

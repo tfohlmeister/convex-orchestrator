@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDatabase } from '../db/index.ts';
-import { AuditRepo, BackupRepo, InstanceRepo, type Backup } from '../db/repos.ts';
+import { AuditRepo, BackupRepo, InstanceRepo, RestoreJobRepo, type Backup } from '../db/repos.ts';
 import type { Instance } from '../supervisor/types.ts';
 import type { MinioStorage } from '../storage/minio.ts';
 import type { Config } from '../config.ts';
@@ -246,11 +246,13 @@ async function setupHarness(overrides: Partial<Config> = {}): Promise<Harness> {
     forceRestartBackend: orchestrator.forceRestartBackend.bind(orchestrator),
     internalHost: '127.0.0.1',
   });
+  const restoreJobs = new RestoreJobRepo(db);
   const restore = new RestoreManager({
     config,
     logger: silentLogger(),
     instances,
     backups,
+    restoreJobs,
     audit,
     minio: minio as unknown as MinioStorage,
     orchestrator,
