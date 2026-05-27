@@ -38,9 +38,13 @@ logs/
 # Playwright local snapshots / state
 .playwright-cli/
 
+# Local Claude Code agent state — scheduled tasks, project-local memory,
+# loop locks. All ephemeral; should never enter git.
+.claude/
 # Locally auto-installed OpenSpec skill + slash-command files. The openspec
 # tooling overwrites these on update; keep them out of git so they don't
-# show as a perpetual diff.
+# show as a perpetual diff. (Subsumed by the broader rule above but kept
+# explicit so future readers understand the intent.)
 .claude/commands/opsx/
 .claude/skills/openspec-*/
 

@@ -112,6 +112,14 @@ const envSchema = z.object({
   // exports/*.blob). Templated with the instance name. Default matches the
   // backend's compiled-in `local_storage` path.
   CONVEX_STORAGE_DIR_TEMPLATE: z.string().default('/var/lib/orchestrator/storage/{instance}'),
+  // Hard cap on the body size of POST /api/instances/:name/restore-from-upload.
+  // Default 16 GiB. Without a cap a single request can fill the orchestrator
+  // data volume and take down all hosted instances.
+  MAX_RESTORE_UPLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1024)
+    .default(16 * 1024 * 1024 * 1024),
 });
 
 export type Config = z.infer<typeof envSchema> & {

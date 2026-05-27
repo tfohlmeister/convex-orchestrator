@@ -3,9 +3,9 @@ import { stream } from 'hono/streaming';
 import { createWriteStream } from 'node:fs';
 import { mkdir, open, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import type { Orchestrator } from '../orchestrator.ts';
 import type { Config } from '../config.ts';
 import type { AuditRepo, BackupRepo, ResourceSampleRepo, StorageSampleRepo } from '../db/repos.ts';
@@ -78,6 +78,12 @@ export function buildRoutes(deps: RouteDeps): Hono {
   const requireBearer = authEnabled
     ? bearerAuth(deps.config.ORCHESTRATOR_ADMIN_TOKEN)
     : passthrough;
+  // Audit-log actor identification. When bearer auth is on the only caller
+  // is "admin" (whoever holds the token), so we ignore x-forwarded-user to
+  // close the audit-log spoof vector. When the API is open we trust the
+  // upstream's forwarded-auth header — that is the only identity signal
+  // available.
+  const actorOf = authEnabled ? () => 'admin' : actorOfFromHeader;
 
   app.get('/healthz', (c) => c.json({ ok: true }));
   app.get('/readyz', (c) =>
@@ -341,15 +347,35 @@ export function buildRoutes(deps: RouteDeps): Hono {
       }
       const body = c.req.raw.body;
       if (!body) throw new OrchestratorError(400, 'EMPTY_BODY', 'no request body');
+      const cap = deps.config.MAX_RESTORE_UPLOAD_BYTES;
+      // Up-front Content-Length check rejects obviously-too-big uploads
+      // without writing a byte to disk. Clients without Content-Length
+      // (chunked transfer) fall through to the streaming counter below.
+      const declared = Number(c.req.header('content-length') ?? '');
+      if (Number.isFinite(declared) && declared > cap) {
+        throw new OrchestratorError(
+          413,
+          'UPLOAD_TOO_LARGE',
+          `upload exceeds MAX_RESTORE_UPLOAD_BYTES (${cap} B)`,
+        );
+      }
       await mkdir(deps.config.BACKUP_WORK_DIR, { recursive: true });
       const tmpPath = join(deps.config.BACKUP_WORK_DIR, `upload_${randomUUID()}.zip`);
       const tmpStream = createWriteStream(tmpPath);
+      const counter = byteCountingTransform(cap);
       try {
-        await pipeline(body as unknown as ReadableStream<Uint8Array>, tmpStream);
+        await pipeline(body as unknown as ReadableStream<Uint8Array>, counter, tmpStream);
         const jobId = await deps.restoreManager.startRestoreFromUpload(name, tmpPath, actorOf(c));
         return c.json({ jobId }, 202);
       } catch (err) {
         await rm(tmpPath, { force: true }).catch(() => {});
+        if (err instanceof Error && err.message === '__UPLOAD_TOO_LARGE__') {
+          throw new OrchestratorError(
+            413,
+            'UPLOAD_TOO_LARGE',
+            `upload exceeds MAX_RESTORE_UPLOAD_BYTES (${cap} B)`,
+          );
+        }
         throw err;
       }
     } catch (err: unknown) {
@@ -448,14 +474,20 @@ export function buildRoutes(deps: RouteDeps): Hono {
   return app;
 }
 
-function actorOf(c: Context): string {
+function actorOfFromHeader(c: Context): string {
   return c.req.header('x-forwarded-user') ?? 'admin';
 }
 
 function bearerAuth(token: string) {
+  // Compute the expected header once. timingSafeEqual prevents byte-by-byte
+  // timing oracles on the comparison; the length-check guard avoids
+  // throwing on mismatched-size Buffers (which timingSafeEqual requires).
+  const expected = Buffer.from(`Bearer ${token}`, 'utf8');
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
-    const header = c.req.header('authorization') ?? '';
-    if (header !== `Bearer ${token}`) {
+    const headerStr = c.req.header('authorization') ?? '';
+    const got = Buffer.from(headerStr, 'utf8');
+    const ok = got.length === expected.length && timingSafeEqual(got, expected);
+    if (!ok) {
       return c.json({ error: 'unauthorized', code: 'UNAUTHORIZED' }, 401);
     }
     await next();
@@ -464,6 +496,21 @@ function bearerAuth(token: string) {
 
 async function passthrough(_c: Context, next: () => Promise<void>): Promise<void> {
   await next();
+}
+
+function byteCountingTransform(cap: number): Transform {
+  let seen = 0;
+  return new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      seen += chunk.length;
+      if (seen > cap) {
+        // pipeline() unwinds and the route's catch surfaces this as 413.
+        cb(new Error('__UPLOAD_TOO_LARGE__'));
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
 }
 
 async function readTail(file: string, tailLines: number): Promise<string> {
