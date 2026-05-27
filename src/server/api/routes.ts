@@ -15,6 +15,7 @@ import type { RestoreManager } from '../backups/restore.ts';
 import type { MinioStorage } from '../storage/minio.ts';
 import { getClkTck } from '../system.ts';
 import { OrchestratorError, errorResponse } from './errors.ts';
+import { cloudUrl, siteUrl } from '../urls.ts';
 import {
   BackupConfigSchema,
   CreateInstanceSchema,
@@ -115,8 +116,8 @@ export function buildRoutes(deps: RouteDeps): Hono {
         baseDomain: i.baseDomain,
         cloudHost: `${i.name}.${i.baseDomain}`,
         siteHost: `${i.name}-site.${i.baseDomain}`,
-        cloudUrl: `${deps.config.EXTERNAL_SCHEME}://${i.name}.${i.baseDomain}${deps.config.EXTERNAL_PORT_SUFFIX}`,
-        siteUrl: `${deps.config.EXTERNAL_SCHEME}://${i.name}-site.${i.baseDomain}${deps.config.EXTERNAL_PORT_SUFFIX}`,
+        cloudUrl: cloudUrl(i, deps.config),
+        siteUrl: siteUrl(i, deps.config),
         cloudPort: i.cloudPort,
         sitePort: i.sitePort,
         adminKey: i.adminKey,
@@ -162,8 +163,8 @@ export function buildRoutes(deps: RouteDeps): Hono {
           cloudPort: inst.cloudPort,
           sitePort: inst.sitePort,
           adminKey: inst.adminKey,
-          cloudUrl: `${deps.config.EXTERNAL_SCHEME}://${inst.name}.${inst.baseDomain}${deps.config.EXTERNAL_PORT_SUFFIX}`,
-          siteUrl: `${deps.config.EXTERNAL_SCHEME}://${inst.name}-site.${inst.baseDomain}${deps.config.EXTERNAL_PORT_SUFFIX}`,
+          cloudUrl: cloudUrl(inst, deps.config),
+          siteUrl: siteUrl(inst, deps.config),
           createdAt: inst.createdAt,
           updatedAt: inst.updatedAt,
           lastError: inst.lastError ?? null,

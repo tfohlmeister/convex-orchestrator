@@ -10,6 +10,7 @@ import type { Supervisor } from './supervisor/supervisor.ts';
 import type { Instance } from './supervisor/types.ts';
 import type { TraefikWriter } from './traefik/writer.ts';
 import { OrchestratorError } from './api/errors.ts';
+import { cloudUrl } from './urls.ts';
 
 export interface OrchestratorDeps {
   config: Config;
@@ -171,7 +172,7 @@ export class Orchestrator {
       deployments: running.map((i) => ({
         name: i.name,
         adminKey: i.adminKey,
-        url: `https://${i.name}.${i.baseDomain}`,
+        url: cloudUrl(i, this.deps.config),
       })),
     };
   }
