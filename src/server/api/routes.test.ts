@@ -109,3 +109,130 @@ describe('auth gating', () => {
     expect(allowed.status).toBe(200);
   });
 });
+
+// Security guards for the mutating endpoints: confirmName mismatch on
+// restore/delete, cross-tenant guards on backup-by-id, and the
+// MAX_RESTORE_UPLOAD_BYTES early reject. None of these were covered
+// previously and the cross-tenant guards in particular are the kind of
+// regression that lets one instance touch another's backups.
+describe('mutating endpoint guards', () => {
+  function buildAppWithStubs(overrides?: {
+    backups?: Partial<RouteDeps['backups']>;
+    orchestrator?: Partial<RouteDeps['orchestrator']>;
+    restoreManager?: Partial<RouteDeps['restoreManager']>;
+    maxRestoreUploadBytes?: number;
+  }) {
+    const orchestrator = {
+      get: (name: string) =>
+        ({
+          name,
+          baseDomain: 'cvx.lan',
+          cloudPort: 13210,
+          sitePort: 13211,
+          adminKey: 'k',
+        }) as never,
+      ...(overrides?.orchestrator ?? {}),
+    } as unknown as RouteDeps['orchestrator'];
+    const backups = {
+      get: () => null,
+      ...(overrides?.backups ?? {}),
+    } as unknown as RouteDeps['backups'];
+    const restoreManager = {
+      startRestoreFromBackup: () => 'job-id',
+      ...(overrides?.restoreManager ?? {}),
+    } as unknown as RouteDeps['restoreManager'];
+    const config = {
+      ORCHESTRATOR_ADMIN_TOKEN: '',
+      EXTERNAL_SCHEME: 'http',
+      EXTERNAL_PORT_SUFFIX: '',
+      BASE_DOMAIN: 'cvx.lan',
+      MAX_RESTORE_UPLOAD_BYTES: overrides?.maxRestoreUploadBytes ?? 16 * 1024 * 1024 * 1024,
+      BACKUP_WORK_DIR: '/tmp',
+    } as unknown as Config;
+    return buildRoutes({
+      orchestrator,
+      config,
+      samples: {} as unknown as RouteDeps['samples'],
+      storage: {} as unknown as RouteDeps['storage'],
+      audit: { record: () => undefined } as unknown as RouteDeps['audit'],
+      backups,
+      backupManager: {} as unknown as RouteDeps['backupManager'],
+      restoreManager,
+      minio: {} as unknown as RouteDeps['minio'],
+      ready: () => true,
+    });
+  }
+
+  test('POST /api/instances/:name/restore rejects when confirmName does not match', async () => {
+    const app = buildAppWithStubs();
+    const res = await app.request('/api/instances/foo/restore', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ backupId: 'abc', confirmName: 'bar' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('CONFIRMATION_MISMATCH');
+  });
+
+  test('DELETE /api/instances/:name rejects when confirmName does not match', async () => {
+    const app = buildAppWithStubs();
+    const res = await app.request('/api/instances/foo', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ confirmName: 'bar' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('CONFIRMATION_MISMATCH');
+  });
+
+  test('DELETE /api/instances/:name/backups/:id blocks cross-instance access (returns 404 to avoid info leak)', async () => {
+    // backups.get returns a row whose instanceName !== the path param. The
+    // route folds "not yours" into the same 404 NOT_FOUND as "never
+    // existed" — that's the right behaviour (don't reveal cross-tenant
+    // backup IDs by status-code timing); the test pins it down.
+    const app = buildAppWithStubs({
+      backups: {
+        get: () =>
+          ({
+            id: 'bk-1',
+            instanceName: 'other-tenant',
+            status: 'complete',
+          }) as never,
+      },
+    });
+    const res = await app.request('/api/instances/foo/backups/bk-1', { method: 'DELETE' });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('NOT_FOUND');
+  });
+
+  test('POST /api/instances/:name/restore-from-upload rejects Content-Length above the cap', async () => {
+    const app = buildAppWithStubs({ maxRestoreUploadBytes: 1024 });
+    const res = await app.request('/api/instances/foo/restore-from-upload', {
+      method: 'POST',
+      headers: {
+        'x-confirm-name': 'foo',
+        'content-length': '99999999',
+        'content-type': 'application/zip',
+      },
+      body: 'X',
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('UPLOAD_TOO_LARGE');
+  });
+
+  test('POST /api/instances/:name/restore-from-upload requires x-confirm-name', async () => {
+    const app = buildAppWithStubs();
+    const res = await app.request('/api/instances/foo/restore-from-upload', {
+      method: 'POST',
+      headers: { 'content-type': 'application/zip' },
+      body: 'X',
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('CONFIRMATION_MISMATCH');
+  });
+});
