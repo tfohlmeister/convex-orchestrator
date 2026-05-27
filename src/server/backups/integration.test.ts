@@ -171,7 +171,6 @@ async function setupHarness(overrides: Partial<Config> = {}): Promise<Harness> {
     LOG_DIR: tmp,
     CONVEX_BINARY: '/dev/null',
     GENERATE_KEY_BINARY: '/dev/null',
-    DEPLOYMENTS_API_PORT: 8081,
     TRAEFIK_DYNAMIC_PATH: join(tmp, 'dynamic.yml'),
     TRAEFIK_CERT_RESOLVER: '',
     TRAEFIK_ENTRYPOINT: 'web',

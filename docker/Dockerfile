@@ -129,7 +129,6 @@ COPY --from=convex-dashboard /out ./dist/dashboard
 RUN mkdir -p /var/log/convex /var/lib/orchestrator /var/lib/orchestrator/backup-work
 
 ENV HTTP_PORT=8080 \
-    DEPLOYMENTS_API_PORT=8081 \
     DATA_DIR=/var/lib/orchestrator \
     LOG_DIR=/var/log/convex \
     CONVEX_BINARY=/convex/convex-local-backend \

@@ -25,7 +25,6 @@ const envSchema = z.object({
   LOG_DIR: z.string().default('/var/log/convex'),
   CONVEX_BINARY: z.string().default('/convex/convex-local-backend'),
   GENERATE_KEY_BINARY: z.string().default('/convex/generate_key'),
-  DEPLOYMENTS_API_PORT: z.coerce.number().int().min(1).max(65_535).default(8081),
   TRAEFIK_DYNAMIC_PATH: z.string().default('/etc/traefik/dynamic/orchestrator.yml'),
   // Cert resolver name. Empty/unset → write `tls: {}` so Traefik serves the
   // default certificate from its cert store (useful for self-signed setups).

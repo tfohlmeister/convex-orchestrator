@@ -18,8 +18,20 @@ export function DashboardEmbedPage() {
     enabled: !!name,
   });
 
+  // Lift the dashboard origin out of the render path so the message
+  // handler closure (created in useEffect) can pin postMessage's target
+  // origin to it instead of '*'. Posting to '*' would deliver the admin
+  // key to whatever origin the iframe happens to be on at reply time —
+  // a real concern if the iframe ever redirects (open-redirect / supply
+  // chain compromise of the bundled dashboard). Found by the code-review
+  // fleet (security #13).
+  const port = window.location.port ? `:${window.location.port}` : '';
+  const dashboardOrigin = query.data
+    ? `${window.location.protocol}//dashboard.${query.data.instance.baseDomain}${port}`
+    : null;
+
   useEffect(() => {
-    if (!query.data) return;
+    if (!query.data || !dashboardOrigin) return;
     const inst = query.data.instance;
     const handler = (event: MessageEvent) => {
       if (event.source !== ref.current?.contentWindow) return;
@@ -33,13 +45,13 @@ export function DashboardEmbedPage() {
           deploymentUrl: inst.cloudUrl,
           deploymentName: inst.name,
         },
-        '*',
+        dashboardOrigin,
       );
       setReady(true);
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [query.data]);
+  }, [query.data, dashboardOrigin]);
 
   if (query.isLoading) {
     return <p className="text-[var(--color-soft)] text-sm p-6">Loading…</p>;
@@ -49,12 +61,7 @@ export function DashboardEmbedPage() {
       <p className="text-[var(--color-danger)] text-sm p-6">{(query.error as Error).message}</p>
     );
   }
-  if (!query.data) return null;
-
-  // Reuse the scheme + port the user came in on, so the iframe lands on the
-  // same reverse proxy (HTTPS in production, http://...:18000 in HTTP spikes).
-  const port = window.location.port ? `:${window.location.port}` : '';
-  const dashboardOrigin = `${window.location.protocol}//dashboard.${query.data.instance.baseDomain}${port}`;
+  if (!query.data || !dashboardOrigin) return null;
 
   return (
     <div className="fixed inset-0 flex flex-col bg-[var(--color-paper)]">

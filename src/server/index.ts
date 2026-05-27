@@ -240,27 +240,21 @@ export async function bootstrap(): Promise<void> {
     fetch: app.fetch,
   });
 
-  // Unauthenticated loopback-only listener for the dashboard switcher. The
-  // official convex-dashboard hardcodes `http://127.0.0.1:<port>` with no
-  // auth header, so we expose the deployments JSON at `/` on loopback and
-  // rely on dashboard sharing this container's network namespace.
-  // See docs/spike-notes.md §3.
-  const deploymentsServer = Bun.serve({
-    hostname: '127.0.0.1',
-    port: config.DEPLOYMENTS_API_PORT,
-    fetch: (req) => {
-      const url = new URL(req.url);
-      if (req.method !== 'GET' || url.pathname !== '/') {
-        return new Response('not found', { status: 404 });
-      }
-      return Response.json(orchestrator.deployments());
-    },
-  });
+  // The dashboard-switcher listener used to live here on
+  // DEPLOYMENTS_API_PORT (default 8081), unauthenticated, returning
+  // plaintext admin keys for every running instance. The original
+  // intent (the official convex-dashboard hardcodes
+  // http://127.0.0.1:<port>) does not survive this orchestrator's
+  // deployment model: the dashboard runs in the user's browser, not in
+  // the orchestrator container, so the browser's 127.0.0.1 resolves to
+  // the user's local machine — not container loopback. The listener
+  // was therefore never actually reachable by its intended consumer,
+  // while on bare-metal hosts it exposed every admin key to any
+  // co-tenant process. The authenticated /api/deployments endpoint
+  // remains for any caller that legitimately needs the list.
+  // Found by the code-review fleet (security #23).
 
-  logger.info(
-    { port: server.port, deploymentsPort: deploymentsServer.port },
-    'orchestrator listening',
-  );
+  logger.info({ port: server.port }, 'orchestrator listening');
 
   const shutdown = async (sig: NodeJS.Signals): Promise<void> => {
     logger.info({ sig }, 'shutting down');
@@ -269,7 +263,6 @@ export async function bootstrap(): Promise<void> {
     backupManager.stop();
     await supervisor.stopAllForShutdown();
     await server.stop();
-    await deploymentsServer.stop();
     db.close();
     process.exit(0);
   };
