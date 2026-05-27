@@ -135,6 +135,30 @@ export function buildRoutes(deps: RouteDeps): Hono {
     return c.json({ instances: enriched });
   });
 
+  // Lightweight sparkline endpoint for the list view. The list page used
+  // to call /api/instances/:name per row every 10s — a full detail fetch
+  // (24h samples + storage + audit + backups) just to render two
+  // sparklines. With N instances that was N detail-payloads/min and
+  // chronic sqlite contention. This trims the payload to ~50 KB of pure
+  // {takenAt, rssKb, fdCount} points for the requested window.
+  app.get('/api/instances/:name/sparkline', requireBearer, (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      deps.orchestrator.get(name);
+      const hours = Math.max(1, Math.min(24, Number(c.req.query('hours') ?? '6')));
+      const since = Date.now() - hours * 60 * 60_000;
+      const rows = deps.samples.recentFor(name, since);
+      const points = rows.map((r) => ({
+        takenAt: r.takenAt,
+        rssKb: r.rssKb,
+        fdCount: r.fdCount,
+      }));
+      return c.json({ points });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
   app.get('/api/instances/:name', requireBearer, async (c) => {
     try {
       const name = InstanceNameSchema.parse(c.req.param('name'));

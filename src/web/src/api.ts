@@ -158,6 +158,14 @@ export const api = {
   listInstances: () =>
     request<{ instances: InstanceListItem[] }>('/api/instances').then((r) => r.instances),
   getInstance: (name: string) => request<InstanceDetail>(`/api/instances/${name}`),
+  // Lightweight 6h sparkline series for the list-view rows. ~50 KB vs the
+  // full detail-endpoint payload (24h samples + storage + audit + 10 most
+  // recent backups). Replaces the N+1 detail fetches the list page used
+  // to do per row every 10s.
+  getSparkline: (name: string, hours = 6) =>
+    request<{ points: { takenAt: number; rssKb: number; fdCount: number }[] }>(
+      `/api/instances/${name}/sparkline?hours=${hours}`,
+    ).then((r) => r.points),
   createInstance: (name: string) =>
     request<{ instance: { name: string; status: string } }>('/api/instances', {
       method: 'POST',

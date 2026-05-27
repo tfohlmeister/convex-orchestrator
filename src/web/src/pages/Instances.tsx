@@ -140,14 +140,15 @@ function Row({ instance, onDelete }: { instance: InstanceListItem; onDelete: () 
         : api.startInstance(instance.name),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['instances'] }),
   });
-  const detail = useQuery({
-    queryKey: ['instance-samples', instance.name],
-    queryFn: () => api.getInstance(instance.name),
+  const sparkline = useQuery({
+    queryKey: ['instance-sparkline', instance.name],
+    queryFn: () => api.getSparkline(instance.name, 6),
     refetchInterval: 10_000,
   });
-  const rssSparkValues = detail.data?.samples.map((s) => s.rssKb) ?? [];
-  const fdSparkValues = (detail.data?.samples ?? []).slice(-48).map((s) => s.fdCount);
-  const latestFd = detail.data?.samples.at(-1)?.fdCount ?? null;
+  const points = sparkline.data ?? [];
+  const rssSparkValues = points.map((s) => s.rssKb);
+  const fdSparkValues = points.slice(-48).map((s) => s.fdCount);
+  const latestFd = points.at(-1)?.fdCount ?? null;
   const rssMb = instance.latestSample ? (instance.latestSample.rssKb / 1024).toFixed(1) : '—';
   const cpu = instance.latestCpuCores != null ? instance.latestCpuCores.toFixed(2) : '—';
 
