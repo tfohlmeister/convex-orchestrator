@@ -72,6 +72,10 @@ export class Orchestrator {
       createdAt: now,
       updatedAt: now,
       lastError: null,
+      backupCron: null,
+      backupRetentionDays: null,
+      backupEnabled: null,
+      backupSuspended: false,
     };
     this.deps.instances.insert(instance);
     this.deps.audit.record({ at: now, actor, action: 'create', instanceName: name });
@@ -114,6 +118,37 @@ export class Orchestrator {
     this.deps.ports.release(name);
     this.deps.instances.delete(name);
     this.deps.audit.record({ at: Date.now(), actor, action: 'delete', instanceName: name });
+  }
+
+  // Pass-through to InstanceRepo so route handlers don't have to know the
+  // db is hiding inside `deps`. Validates the instance exists.
+  updateBackupConfig(
+    name: string,
+    cfg: {
+      cron?: string | null;
+      retentionDays?: number | null;
+      enabled?: boolean | null;
+      suspended?: boolean;
+    },
+  ): void {
+    this.get(name);
+    this.deps.instances.updateBackupConfig(name, cfg);
+  }
+
+  // Hard-restart the backend for a stuck export. SIGTERM via supervisor.stop
+  // unblocks the Convex `ExportInProgress` lock (only resolves via process
+  // restart). Re-spawns immediately and re-attaches the Traefik route.
+  async forceRestartBackend(name: string, actor: string): Promise<void> {
+    const inst = this.get(name);
+    this.deps.logger.warn({ name }, 'force-restart-backend (stuck export recovery)');
+    await this.deps.supervisor.stop(name);
+    await this.spawnAndRoute(inst);
+    this.deps.audit.record({
+      at: Date.now(),
+      actor,
+      action: 'backend_restart_for_stuck_export',
+      instanceName: name,
+    });
   }
 
   async restoreRunning(): Promise<void> {

@@ -1,18 +1,27 @@
 import { Hono, type Context } from 'hono';
 import { stream } from 'hono/streaming';
-import { open, stat } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { mkdir, open, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
 import type { Orchestrator } from '../orchestrator.ts';
 import type { Config } from '../config.ts';
-import type { AuditRepo, ResourceSampleRepo, StorageSampleRepo } from '../db/repos.ts';
+import type { AuditRepo, BackupRepo, ResourceSampleRepo, StorageSampleRepo } from '../db/repos.ts';
 import type { ResourceSample } from '../supervisor/types.ts';
+import type { BackupManager } from '../backups/manager.ts';
+import type { RestoreManager } from '../backups/restore.ts';
+import type { MinioStorage } from '../storage/minio.ts';
 import { getClkTck } from '../system.ts';
 import { OrchestratorError, errorResponse } from './errors.ts';
 import {
+  BackupConfigSchema,
   CreateInstanceSchema,
   DeleteConfirmSchema,
   InstanceNameSchema,
   LogsQuerySchema,
+  RestoreSchema,
 } from './schemas.ts';
 
 export interface SampleWithCpu {
@@ -56,6 +65,10 @@ export interface RouteDeps {
   samples: ResourceSampleRepo;
   storage: StorageSampleRepo;
   audit: AuditRepo;
+  backups: BackupRepo;
+  backupManager: BackupManager;
+  restoreManager: RestoreManager;
+  minio: MinioStorage;
   ready: () => boolean;
 }
 
@@ -86,6 +99,10 @@ export function buildRoutes(deps: RouteDeps): Hono {
       const buckets = deps.storage.latestPerBucketFor(i.name);
       const latestStorageBytes =
         buckets.length > 0 ? buckets.reduce((acc, b) => acc + b.sizeBytes, 0) : null;
+      const latestBackup = deps.backups.latestFor(i.name);
+      const latestComplete = deps.backups.latestCompleteFor(i.name);
+      const recent = deps.backups.recentFor(i.name, 10);
+      const hasStuckBackup = recent.some((b) => b.status === 'stuck');
       return {
         name: i.name,
         status: i.status,
@@ -103,6 +120,9 @@ export function buildRoutes(deps: RouteDeps): Hono {
         latestSample: deps.samples.latestFor(i.name),
         latestCpuCores,
         latestStorageBytes,
+        latestBackupAt: latestComplete?.startedAt ?? null,
+        latestBackupStatus: latestBackup?.status ?? null,
+        hasStuckBackup,
       };
     });
     return c.json({ instances: enriched });
@@ -122,6 +142,10 @@ export function buildRoutes(deps: RouteDeps): Hono {
       const latestStorageBytes =
         buckets.length > 0 ? buckets.reduce((acc, b) => acc + b.sizeBytes, 0) : null;
       const audit = deps.audit.recentFor(name, 50);
+      const latestBackup = deps.backups.latestFor(name);
+      const latestComplete = deps.backups.latestCompleteFor(name);
+      const recent = deps.backups.recentFor(name, 10);
+      const hasStuckBackup = recent.some((b) => b.status === 'stuck');
       return c.json({
         instance: {
           name: inst.name,
@@ -139,6 +163,13 @@ export function buildRoutes(deps: RouteDeps): Hono {
           lastError: inst.lastError ?? null,
           latestCpuCores,
           latestStorageBytes,
+          latestBackupAt: latestComplete?.startedAt ?? null,
+          latestBackupStatus: latestBackup?.status ?? null,
+          hasStuckBackup,
+          backupCron: inst.backupCron,
+          backupRetentionDays: inst.backupRetentionDays,
+          backupEnabled: inst.backupEnabled,
+          backupSuspended: inst.backupSuspended,
         },
         samples,
         storageSamples,
@@ -191,6 +222,203 @@ export function buildRoutes(deps: RouteDeps): Hono {
         );
       }
       await deps.orchestrator.delete(name, actorOf(c));
+      return c.json({ ok: true });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.get('/api/instances/:name/backups', requireBearer, (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      deps.orchestrator.get(name);
+      const list = deps.backups.recentFor(name, 200);
+      return c.json({ backups: list });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.post('/api/instances/:name/backup', requireBearer, (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      const inst = deps.orchestrator.get(name);
+      const id = deps.backupManager.enqueueManual(inst, actorOf(c));
+      return c.json({ ok: true, backupId: id }, 202);
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.delete('/api/instances/:name/backups/:id', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      const id = c.req.param('id');
+      const inst = deps.orchestrator.get(name);
+      const b = deps.backups.get(id ?? '');
+      if (!b || b.instanceName !== name) {
+        throw new OrchestratorError(404, 'NOT_FOUND', `backup ${id} not found`);
+      }
+      if (b.targetKey) {
+        await deps.minio.deleteBackup(inst.bucketPrefix, b.targetKey);
+      }
+      deps.backups.delete(b.id);
+      deps.audit.record({
+        at: Date.now(),
+        actor: actorOf(c),
+        action: 'backup_deleted_manual',
+        instanceName: name,
+        details: `id=${b.id} source=${b.source}`,
+      });
+      return c.json({ ok: true });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.get('/api/instances/:name/backups/:id/download', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      const id = c.req.param('id') ?? '';
+      const inst = deps.orchestrator.get(name);
+      const b = deps.backups.get(id);
+      if (!b || b.instanceName !== name || !b.targetKey || b.status !== 'complete') {
+        throw new OrchestratorError(404, 'NOT_FOUND', `backup ${id} not downloadable`);
+      }
+      const s = await deps.minio.getBackupStream(inst.bucketPrefix, b.targetKey);
+      const isoStamp = new Date(b.startedAt).toISOString().replace(/[:.]/g, '-');
+      const filename = `${name}_${isoStamp}.zip`;
+      c.header('content-type', 'application/zip');
+      c.header('content-disposition', `attachment; filename="${filename}"`);
+      if (b.sizeBytes != null) c.header('content-length', String(b.sizeBytes));
+      return stream(c, async (out) => {
+        const web = Readable.toWeb(s) as ReadableStream<Uint8Array>;
+        const reader = web.getReader();
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) await out.write(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.post('/api/instances/:name/restore', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      const body = RestoreSchema.parse(await c.req.json());
+      if (body.confirmName !== name) {
+        throw new OrchestratorError(
+          400,
+          'CONFIRMATION_MISMATCH',
+          'confirmName must equal the instance name',
+        );
+      }
+      const id = deps.restoreManager.startRestoreFromBackup(name, body.backupId, actorOf(c));
+      return c.json({ jobId: id }, 202);
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.post('/api/instances/:name/restore-from-upload', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      deps.orchestrator.get(name);
+      const confirm = c.req.header('x-confirm-name');
+      if (confirm !== name) {
+        throw new OrchestratorError(
+          400,
+          'CONFIRMATION_MISMATCH',
+          'x-confirm-name header must equal the instance name',
+        );
+      }
+      const body = c.req.raw.body;
+      if (!body) throw new OrchestratorError(400, 'EMPTY_BODY', 'no request body');
+      await mkdir(deps.config.BACKUP_WORK_DIR, { recursive: true });
+      const tmpPath = join(deps.config.BACKUP_WORK_DIR, `upload_${randomUUID()}.zip`);
+      const tmpStream = createWriteStream(tmpPath);
+      try {
+        await pipeline(body as unknown as ReadableStream<Uint8Array>, tmpStream);
+        const jobId = await deps.restoreManager.startRestoreFromUpload(name, tmpPath, actorOf(c));
+        return c.json({ jobId }, 202);
+      } catch (err) {
+        await rm(tmpPath, { force: true }).catch(() => {});
+        throw err;
+      }
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.get('/api/instances/:name/restore-jobs/:id', requireBearer, (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      const id = c.req.param('id') ?? '';
+      deps.orchestrator.get(name);
+      const job = deps.restoreManager.getJob(id);
+      if (!job || job.instanceName !== name) {
+        throw new OrchestratorError(404, 'NOT_FOUND', `restore job ${id} not found`);
+      }
+      return c.json({ job });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.put('/api/instances/:name/backup-config', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      const inst = deps.orchestrator.get(name);
+      const body = BackupConfigSchema.parse(await c.req.json());
+      // Validate cron if present (manager also re-validates but failing the
+      // 400 early gives the UI a clearer error).
+      if (typeof body.cron === 'string') {
+        const { parseCron } = await import('../backups/cron.ts');
+        parseCron(body.cron);
+      }
+      void inst;
+      const update: {
+        cron?: string | null;
+        retentionDays?: number | null;
+        enabled?: boolean | null;
+        suspended?: boolean;
+      } = {};
+      if (body.cron !== undefined) update.cron = body.cron;
+      if (body.retentionDays !== undefined) update.retentionDays = body.retentionDays;
+      if (body.enabled !== undefined) update.enabled = body.enabled;
+      // Enabling clears any suspension.
+      if (body.enabled === true) update.suspended = false;
+      deps.orchestrator.updateBackupConfig(name, update);
+      deps.audit.record({
+        at: Date.now(),
+        actor: actorOf(c),
+        action: 'backup_config_updated',
+        instanceName: name,
+        details: JSON.stringify(update),
+      });
+      const refreshed = deps.orchestrator.get(name);
+      return c.json({
+        backupCron: refreshed.backupCron,
+        backupRetentionDays: refreshed.backupRetentionDays,
+        backupEnabled: refreshed.backupEnabled,
+        backupSuspended: refreshed.backupSuspended,
+      });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.post('/api/instances/:name/force-restart-backend', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      await deps.orchestrator.forceRestartBackend(name, actorOf(c));
       return c.json({ ok: true });
     } catch (err: unknown) {
       return errorResponse(c, err);

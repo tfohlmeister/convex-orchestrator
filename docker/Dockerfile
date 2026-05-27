@@ -104,9 +104,15 @@ RUN cargo build --release -p keybroker --bin generate_key \
 
 # ---------- Stage 5: runtime ----------
 FROM oven/bun:1.3-slim AS runtime
+# `convex` is the official npm CLI used by the backup scheduler for
+# `convex export` / `convex import` against each instance. Pinned via Renovate
+# (npm:convex). Node.js + npm are required because `npx convex` shells out
+# to node — Bun cannot run the CLI directly.
+ARG CONVEX_CLI_VERSION=1.18.2
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl tini libpq5 \
-    && rm -rf /var/lib/apt/lists/*
+      ca-certificates curl tini libpq5 nodejs npm \
+    && npm install -g --no-fund --no-audit "convex@${CONVEX_CLI_VERSION}" \
+    && rm -rf /var/lib/apt/lists/* /root/.npm
 
 WORKDIR /app
 COPY --from=convex-backend-bin /out/convex-local-backend /convex/convex-local-backend
@@ -115,14 +121,16 @@ COPY --from=server-build /app/dist/server ./dist/server
 COPY --from=web-build /app/dist/web ./dist/web
 COPY --from=convex-dashboard /out ./dist/dashboard
 
-RUN mkdir -p /var/log/convex /var/lib/orchestrator
+RUN mkdir -p /var/log/convex /var/lib/orchestrator /var/lib/orchestrator/backup-work
 
 ENV HTTP_PORT=8080 \
     DEPLOYMENTS_API_PORT=8081 \
     DATA_DIR=/var/lib/orchestrator \
     LOG_DIR=/var/log/convex \
     CONVEX_BINARY=/convex/convex-local-backend \
-    GENERATE_KEY_BINARY=/convex/generate_key
+    GENERATE_KEY_BINARY=/convex/generate_key \
+    CONVEX_CLI=convex \
+    BACKUP_WORK_DIR=/var/lib/orchestrator/backup-work
 
 EXPOSE 8080
 

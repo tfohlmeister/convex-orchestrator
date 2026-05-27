@@ -1,7 +1,7 @@
 import type { Logger } from '../logger.ts';
 import type { StorageSample, StorageSampleRepo } from '../db/repos.ts';
 import type { Instance } from '../supervisor/types.ts';
-import { BUCKET_SUFFIXES, type MinioStorage } from './minio.ts';
+import { SAMPLED_BUCKET_SUFFIXES, type MinioStorage } from './minio.ts';
 
 export const DEFAULT_STORAGE_INTERVAL_MS = 5 * 60_000;
 export const DEFAULT_STORAGE_PAGE_LIMIT = 100;
@@ -56,7 +56,7 @@ export class StorageSampler {
       const takenAt = Date.now();
       const samples: StorageSample[] = [];
       for (const instance of instances) {
-        for (const suffix of BUCKET_SUFFIXES) {
+        for (const suffix of SAMPLED_BUCKET_SUFFIXES) {
           const bucket = `${instance.bucketPrefix}-${suffix}`;
           try {
             const m = await this.deps.minio.measureBucket(bucket, pageLimit);

@@ -27,6 +27,12 @@
       "matchStrings": ["ARG CONVEX_VERSION=(?<currentValue>.+?)\\s"],
       "depNameTemplate": "get-convex/convex-backend",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "fileMatch": ["docker/Dockerfile$"],
+      "matchStrings": ["ARG CONVEX_CLI_VERSION=(?<currentValue>.+?)\\s"],
+      "depNameTemplate": "convex",
+      "datasourceTemplate": "npm"
     }
   ]
 }

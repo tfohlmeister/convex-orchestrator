@@ -16,6 +16,7 @@ import { api, dashboardEmbedPath, getToken, type StorageSample } from '../api';
 import { StatusBadge } from '../components/StatusBadge';
 import { ConnectionPanel } from '../components/ConnectionPanel';
 import { EndpointsPanel } from '../components/EndpointsPanel';
+import { BackupsSection, BackupSettings } from '../components/BackupsSection';
 
 // Fixed colour + order for the storage breakdown so the legend is stable.
 const STORAGE_SERIES: { suffix: string; colour: string }[] = [
@@ -242,6 +243,18 @@ export function InstanceDetailPage() {
         <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">Logs (stdout, live)</h2>
         <LogTail name={instance.name} />
       </section>
+
+      <BackupsSection instanceName={instance.name} hasStuckBackup={instance.hasStuckBackup} />
+
+      <BackupSettings
+        instanceName={instance.name}
+        initial={{
+          backupCron: instance.backupCron,
+          backupRetentionDays: instance.backupRetentionDays,
+          backupEnabled: instance.backupEnabled,
+          backupSuspended: instance.backupSuspended,
+        }}
+      />
 
       <section>
         <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">Audit</h2>

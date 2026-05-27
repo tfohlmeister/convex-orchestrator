@@ -15,6 +15,45 @@ export interface InstanceListItem {
   latestSample: ResourceSample | null;
   latestCpuCores: number | null;
   latestStorageBytes: number | null;
+  // Backup metadata for the overview "Last backup" column.
+  latestBackupAt: number | null;
+  latestBackupStatus: BackupStatus | null;
+  hasStuckBackup: boolean;
+}
+
+export type BackupSource = 'auto' | 'manual' | 'manual-upload' | 'pre-restore';
+export type BackupStatus = 'running' | 'complete' | 'failed' | 'stuck' | 'corrupt';
+
+export interface Backup {
+  id: string;
+  instanceName: string;
+  source: BackupSource;
+  startedAt: number;
+  completedAt: number | null;
+  status: BackupStatus;
+  targetKey: string | null;
+  sizeBytes: number | null;
+  sha256: string | null;
+  convexVersion: string | null;
+  errorMessage: string | null;
+}
+
+export interface BackupConfig {
+  backupCron: string | null;
+  backupRetentionDays: number | null;
+  backupEnabled: boolean | null;
+  backupSuspended: boolean;
+}
+
+export interface RestoreJob {
+  id: string;
+  instanceName: string;
+  sourceBackupId: string;
+  preRestoreBackupId: string | null;
+  status: 'queued' | 'pre-backup' | 'stopping' | 'starting' | 'importing' | 'complete' | 'failed';
+  error: string | null;
+  startedAt: number;
+  completedAt: number | null;
 }
 
 export function dashboardEmbedPath(instanceName: string): string {
@@ -51,6 +90,10 @@ export interface InstanceDetail {
     cloudUrl: string;
     latestCpuCores: number | null;
     latestStorageBytes: number | null;
+    backupCron: string | null;
+    backupRetentionDays: number | null;
+    backupEnabled: boolean | null;
+    backupSuspended: boolean;
   };
   samples: SampleWithCpu[];
   storageSamples: StorageSample[];
@@ -133,4 +176,56 @@ export const api = {
     const t = encodeURIComponent(getToken());
     return `/api/instances/${name}/logs?stream=${stream}&follow=${follow ? '1' : '0'}&t=${t}`;
   },
+  listBackups: (name: string) =>
+    request<{ backups: Backup[] }>(`/api/instances/${name}/backups`).then((r) => r.backups),
+  triggerBackup: (name: string) =>
+    request<{ ok: boolean; backupId: string }>(`/api/instances/${name}/backup`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  deleteBackup: (name: string, id: string) =>
+    request<{ ok: boolean }>(`/api/instances/${name}/backups/${id}`, { method: 'DELETE' }),
+  downloadBackupUrl: (name: string, id: string): string =>
+    `/api/instances/${name}/backups/${id}/download`,
+  restoreFromBackup: (name: string, backupId: string) =>
+    request<{ jobId: string }>(`/api/instances/${name}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ backupId, confirmName: name }),
+    }),
+  restoreFromUpload: async (name: string, file: File): Promise<{ jobId: string }> => {
+    const token = getToken();
+    const headers: HeadersInit = {
+      'x-confirm-name': name,
+      'content-type': 'application/zip',
+    };
+    if (token) (headers as Record<string, string>).authorization = `Bearer ${token}`;
+    const res = await fetch(`/api/instances/${name}/restore-from-upload`, {
+      method: 'POST',
+      headers,
+      body: file,
+    });
+    if (!res.ok) {
+      let body: { error?: string; code?: string } = {};
+      try {
+        body = (await res.json()) as typeof body;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, body.code ?? 'HTTP_ERROR', body.error ?? res.statusText);
+    }
+    return (await res.json()) as { jobId: string };
+  },
+  getRestoreJob: (name: string, id: string) =>
+    request<{ job: RestoreJob }>(`/api/instances/${name}/restore-jobs/${id}`).then((r) => r.job),
+  updateBackupConfig: (name: string, cfg: Partial<BackupConfig>) =>
+    request<BackupConfig>(`/api/instances/${name}/backup-config`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        cron: cfg.backupCron,
+        retentionDays: cfg.backupRetentionDays,
+        enabled: cfg.backupEnabled,
+      }),
+    }),
+  forceRestartBackend: (name: string) =>
+    request<{ ok: boolean }>(`/api/instances/${name}/force-restart-backend`, { method: 'POST' }),
 };

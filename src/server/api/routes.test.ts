@@ -77,6 +77,10 @@ describe('auth gating', () => {
       samples: stubRepo as unknown as RouteDeps['samples'],
       storage: stubRepo as unknown as RouteDeps['storage'],
       audit: stubRepo as unknown as RouteDeps['audit'],
+      backups: stubRepo as unknown as RouteDeps['backups'],
+      backupManager: {} as unknown as RouteDeps['backupManager'],
+      restoreManager: {} as unknown as RouteDeps['restoreManager'],
+      minio: {} as unknown as RouteDeps['minio'],
       ready: () => true,
     });
   }

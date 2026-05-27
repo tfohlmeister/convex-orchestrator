@@ -8,11 +8,14 @@ import { createLogger } from './logger.ts';
 import { openDatabase } from './db/index.ts';
 import {
   AuditRepo,
+  BackupRepo,
   InstanceRepo,
   PortRepo,
   ResourceSampleRepo,
   StorageSampleRepo,
 } from './db/repos.ts';
+import { BackupManager } from './backups/manager.ts';
+import { RestoreManager } from './backups/restore.ts';
 import { PortAllocator } from './ports.ts';
 import { PostgresStorage } from './storage/postgres.ts';
 import { MinioStorage } from './storage/minio.ts';
@@ -37,6 +40,7 @@ export async function bootstrap(): Promise<void> {
   const samples = new ResourceSampleRepo(db);
   const storage = new StorageSampleRepo(db);
   const audit = new AuditRepo(db);
+  const backups = new BackupRepo(db);
   logger.info({ clkTck: getClkTck() }, 'resolved CLK_TCK for CPU sample derivation');
 
   if (config.ORCHESTRATOR_ADMIN_TOKEN.length === 0) {
@@ -98,6 +102,30 @@ export async function bootstrap(): Promise<void> {
     traefik,
   });
 
+  const backupManager = new BackupManager({
+    config,
+    logger,
+    instances,
+    backups,
+    audit,
+    minio,
+    listInstances: () => instances.list(),
+    forceRestartBackend: (name, actor) => orchestrator.forceRestartBackend(name, actor),
+    internalHost: '127.0.0.1',
+  });
+
+  const restoreManager = new RestoreManager({
+    config,
+    logger,
+    instances,
+    backups,
+    audit,
+    minio,
+    orchestrator,
+    backupManager,
+    internalHost: '127.0.0.1',
+  });
+
   const storageSampler = new StorageSampler({
     minio,
     repo: storage,
@@ -118,6 +146,7 @@ export async function bootstrap(): Promise<void> {
   let ready = false;
   supervisor.startBackgroundJobs();
   storageSampler.start();
+  backupManager.start();
 
   const existing = instances.list();
   traefik.replaceAll(
@@ -182,6 +211,10 @@ export async function bootstrap(): Promise<void> {
     samples,
     storage,
     audit,
+    backups,
+    backupManager,
+    restoreManager,
+    minio,
     ready: () => ready,
   });
   app.route('/', apiRoutes);
@@ -233,6 +266,7 @@ export async function bootstrap(): Promise<void> {
     logger.info({ sig }, 'shutting down');
     supervisor.stopBackgroundJobs();
     storageSampler.stop();
+    backupManager.stop();
     await supervisor.stopAllForShutdown();
     await server.stop();
     await deploymentsServer.stop();

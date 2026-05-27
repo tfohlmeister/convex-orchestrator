@@ -19,6 +19,10 @@ function fakeInstance(name: string): Instance {
     createdAt: 0,
     updatedAt: 0,
     lastError: null,
+    backupCron: null,
+    backupRetentionDays: null,
+    backupEnabled: null,
+    backupSuspended: false,
   };
 }
 

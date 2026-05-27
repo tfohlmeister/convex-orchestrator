@@ -13,6 +13,13 @@ export interface Instance {
   createdAt: number;
   updatedAt: number;
   lastError?: string | null;
+  // Per-instance backup config. null → fall back to orchestrator defaults.
+  backupCron: string | null;
+  backupRetentionDays: number | null;
+  backupEnabled: boolean | null;
+  // True after consecutive backup failures suspended automatic scheduling.
+  // Cleared by manual re-enable.
+  backupSuspended: boolean;
 }
 
 export interface ProcessState {

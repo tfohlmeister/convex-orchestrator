@@ -15,6 +15,10 @@ interface InstanceRow {
   created_at: number;
   updated_at: number;
   last_error: string | null;
+  backup_cron: string | null;
+  backup_retention_days: number | null;
+  backup_enabled: number | null;
+  backup_suspended: number;
 }
 
 export class InstanceRepo {
@@ -30,8 +34,9 @@ export class InstanceRepo {
           name, status, base_domain, cloud_port, site_port,
           admin_key_enc, instance_secret_enc,
           postgres_schema, bucket_prefix,
-          created_at, updated_at, last_error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_at, updated_at, last_error,
+          backup_cron, backup_retention_days, backup_enabled, backup_suspended
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         instance.name,
@@ -46,6 +51,10 @@ export class InstanceRepo {
         instance.createdAt,
         instance.updatedAt,
         instance.lastError ?? null,
+        instance.backupCron,
+        instance.backupRetentionDays,
+        instance.backupEnabled === null ? null : instance.backupEnabled ? 1 : 0,
+        instance.backupSuspended ? 1 : 0,
       );
   }
 
@@ -53,6 +62,40 @@ export class InstanceRepo {
     this.db
       .prepare('UPDATE instances SET status = ?, last_error = ?, updated_at = ? WHERE name = ?')
       .run(status, lastError, Date.now(), name);
+  }
+
+  updateBackupConfig(
+    name: string,
+    cfg: {
+      cron?: string | null;
+      retentionDays?: number | null;
+      enabled?: boolean | null;
+      suspended?: boolean;
+    },
+  ): void {
+    const sets: string[] = [];
+    const args: (string | number | null)[] = [];
+    if (cfg.cron !== undefined) {
+      sets.push('backup_cron = ?');
+      args.push(cfg.cron);
+    }
+    if (cfg.retentionDays !== undefined) {
+      sets.push('backup_retention_days = ?');
+      args.push(cfg.retentionDays);
+    }
+    if (cfg.enabled !== undefined) {
+      sets.push('backup_enabled = ?');
+      args.push(cfg.enabled === null ? null : cfg.enabled ? 1 : 0);
+    }
+    if (cfg.suspended !== undefined) {
+      sets.push('backup_suspended = ?');
+      args.push(cfg.suspended ? 1 : 0);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    args.push(Date.now());
+    args.push(name);
+    this.db.prepare(`UPDATE instances SET ${sets.join(', ')} WHERE name = ?`).run(...args);
   }
 
   delete(name: string): void {
@@ -95,6 +138,10 @@ export class InstanceRepo {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastError: row.last_error,
+      backupCron: row.backup_cron,
+      backupRetentionDays: row.backup_retention_days,
+      backupEnabled: row.backup_enabled === null ? null : row.backup_enabled === 1,
+      backupSuspended: row.backup_suspended === 1,
     };
   }
 }
@@ -345,6 +392,206 @@ export class StorageSampleRepo {
 
   pruneOlderThan(cutoffMs: number): void {
     this.db.prepare('DELETE FROM storage_samples WHERE taken_at < ?').run(cutoffMs);
+  }
+}
+
+export type BackupSource = 'auto' | 'manual' | 'manual-upload' | 'pre-restore';
+export type BackupStatus = 'running' | 'complete' | 'failed' | 'stuck' | 'corrupt';
+
+export interface Backup {
+  id: string;
+  instanceName: string;
+  source: BackupSource;
+  startedAt: number;
+  completedAt: number | null;
+  status: BackupStatus;
+  targetKey: string | null;
+  sizeBytes: number | null;
+  sha256: string | null;
+  convexVersion: string | null;
+  errorMessage: string | null;
+}
+
+interface BackupRow {
+  id: string;
+  instance_name: string;
+  source: BackupSource;
+  started_at: number;
+  completed_at: number | null;
+  status: BackupStatus;
+  target_key: string | null;
+  size_bytes: number | null;
+  sha256: string | null;
+  convex_version: string | null;
+  error_message: string | null;
+}
+
+export class BackupRepo {
+  constructor(private readonly db: DB) {}
+
+  insert(b: Backup): void {
+    this.db
+      .prepare(
+        `INSERT INTO backups (
+          id, instance_name, source, started_at, completed_at,
+          status, target_key, size_bytes, sha256, convex_version, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        b.id,
+        b.instanceName,
+        b.source,
+        b.startedAt,
+        b.completedAt,
+        b.status,
+        b.targetKey,
+        b.sizeBytes,
+        b.sha256,
+        b.convexVersion,
+        b.errorMessage,
+      );
+  }
+
+  updateStatus(
+    id: string,
+    fields: {
+      status?: BackupStatus;
+      completedAt?: number | null;
+      targetKey?: string | null;
+      sizeBytes?: number | null;
+      sha256?: string | null;
+      convexVersion?: string | null;
+      errorMessage?: string | null;
+    },
+  ): void {
+    const sets: string[] = [];
+    const args: (string | number | null)[] = [];
+    if (fields.status !== undefined) {
+      sets.push('status = ?');
+      args.push(fields.status);
+    }
+    if (fields.completedAt !== undefined) {
+      sets.push('completed_at = ?');
+      args.push(fields.completedAt);
+    }
+    if (fields.targetKey !== undefined) {
+      sets.push('target_key = ?');
+      args.push(fields.targetKey);
+    }
+    if (fields.sizeBytes !== undefined) {
+      sets.push('size_bytes = ?');
+      args.push(fields.sizeBytes);
+    }
+    if (fields.sha256 !== undefined) {
+      sets.push('sha256 = ?');
+      args.push(fields.sha256);
+    }
+    if (fields.convexVersion !== undefined) {
+      sets.push('convex_version = ?');
+      args.push(fields.convexVersion);
+    }
+    if (fields.errorMessage !== undefined) {
+      sets.push('error_message = ?');
+      args.push(fields.errorMessage);
+    }
+    if (sets.length === 0) return;
+    args.push(id);
+    this.db.prepare(`UPDATE backups SET ${sets.join(', ')} WHERE id = ?`).run(...args);
+  }
+
+  get(id: string): Backup | null {
+    const r = this.db.query<BackupRow, [string]>('SELECT * FROM backups WHERE id = ?').get(id);
+    return r ? this.rowToBackup(r) : null;
+  }
+
+  recentFor(instanceName: string, limit = 50): Backup[] {
+    const rows = this.db
+      .query<
+        BackupRow,
+        [string, number]
+      >('SELECT * FROM backups WHERE instance_name = ? ORDER BY started_at DESC LIMIT ?')
+      .all(instanceName, limit);
+    return rows.map((r) => this.rowToBackup(r));
+  }
+
+  // Returns automatic backups whose started_at is older than `cutoffMs`.
+  // Pre-restore + manual backups are intentionally excluded — only `auto`
+  // is subject to standard retention.
+  listOlderThan(instanceName: string, source: BackupSource, cutoffMs: number): Backup[] {
+    const rows = this.db
+      .query<
+        BackupRow,
+        [string, BackupSource, number]
+      >("SELECT * FROM backups WHERE instance_name = ? AND source = ? AND started_at < ? AND status = 'complete' ORDER BY started_at")
+      .all(instanceName, source, cutoffMs);
+    return rows.map((r) => this.rowToBackup(r));
+  }
+
+  latestFor(instanceName: string): Backup | null {
+    const r = this.db
+      .query<
+        BackupRow,
+        [string]
+      >('SELECT * FROM backups WHERE instance_name = ? ORDER BY started_at DESC LIMIT 1')
+      .get(instanceName);
+    return r ? this.rowToBackup(r) : null;
+  }
+
+  latestCompleteFor(instanceName: string): Backup | null {
+    const r = this.db
+      .query<
+        BackupRow,
+        [string]
+      >("SELECT * FROM backups WHERE instance_name = ? AND status = 'complete' ORDER BY started_at DESC LIMIT 1")
+      .get(instanceName);
+    return r ? this.rowToBackup(r) : null;
+  }
+
+  // Consecutive failed `auto` backups since the last successful one. Used by
+  // the scheduler to suspend automatic backups after 3 strikes.
+  consecutiveAutoFailures(instanceName: string): number {
+    const rows = this.db
+      .query<
+        { status: BackupStatus },
+        [string]
+      >("SELECT status FROM backups WHERE instance_name = ? AND source = 'auto' ORDER BY started_at DESC LIMIT 10")
+      .all(instanceName);
+    let count = 0;
+    for (const r of rows) {
+      if (r.status === 'failed' || r.status === 'stuck' || r.status === 'corrupt') count += 1;
+      else break;
+    }
+    return count;
+  }
+
+  listRunningStarted(beforeMs: number): Backup[] {
+    const rows = this.db
+      .query<
+        BackupRow,
+        [number]
+      >("SELECT * FROM backups WHERE status = 'running' AND started_at < ?")
+      .all(beforeMs);
+    return rows.map((r) => this.rowToBackup(r));
+  }
+
+  delete(id: string): void {
+    this.db.prepare('DELETE FROM backups WHERE id = ?').run(id);
+  }
+
+  private rowToBackup(r: BackupRow): Backup {
+    return {
+      id: r.id,
+      instanceName: r.instance_name,
+      source: r.source,
+      startedAt: r.started_at,
+      completedAt: r.completed_at,
+      status: r.status,
+      targetKey: r.target_key,
+      sizeBytes: r.size_bytes,
+      sha256: r.sha256,
+      convexVersion: r.convex_version,
+      errorMessage: r.error_message,
+    };
   }
 }
 

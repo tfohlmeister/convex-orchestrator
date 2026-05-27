@@ -33,6 +33,10 @@ export function DeleteConfirmDialog({ open, name, onClose, onDeleted }: Props) {
           Traefik routes, and kills the backend process.{' '}
           <strong className="text-red-300">Irreversible.</strong>
         </p>
+        <p className="text-xs text-amber-300 mb-4 bg-amber-900/30 border border-amber-700/50 rounded-md px-3 py-2">
+          Backups in MinIO will be deleted along with everything else. Download anything you want to
+          keep <em>before</em> confirming.
+        </p>
         <label className="block text-sm text-slate-300 mb-1">
           Type <code className="font-mono">{name}</code> to confirm
         </label>

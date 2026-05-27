@@ -50,6 +50,28 @@ This exposes Traefik on `TRAEFIK_HTTP_PORT` (default 18000), drops the cert-reso
 
 The Dockerfile pulls the Convex backend binary from the official `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key` from the same git tag (FSL-1.1-Apache-2.0 permits local builds), and bundles the dashboard static export — no separate dashboard container needed. See [`docs/spike-notes.md`](docs/spike-notes.md) for the full architecture write-up.
 
+## Backups and Restore
+
+Each instance is backed up automatically on the orchestrator's schedule and the snapshots land in a dedicated MinIO bucket (`<instance>-backups`). Defaults:
+
+- **Schedule**: 03:00 server-local daily (`BACKUP_DEFAULT_CRON=0 3 * * *`)
+- **Retention**: 30 days (`BACKUP_RETENTION_DAYS=30`), only applied to `source=auto` rows. Manual and pre-restore backups are kept until you delete them.
+- **Concurrency**: two backups at a time across all instances (`BACKUP_MAX_CONCURRENT=2`)
+- **Storage layout**: `<instance>-backups/<instance>_<iso>_v<version>_<uuid>.zip` (Convex's own `.zip` export format, includes file storage)
+- **Health gating**: after 3 consecutive automatic failures the schedule is suspended for that instance until you re-enable it from the UI
+
+The UI exposes:
+
+- A "Backups" section on the instance detail page with `Backup now`, per-row `Download` / `Restore` / `Delete`, and a "Restore from upload…" modal for ad-hoc `.zip` imports.
+- A "Backup settings" panel for per-instance cron, retention, and the enabled toggle.
+- A "Last backup" column in the main instances list, colour-coded green / amber (> 2 d) / red (> 5 d) / stuck.
+
+Restore is destructive: the flow always takes a `source=pre-restore` backup first, then runs `convex import --replace-all --include-file-storage` against a freshly restarted backend. If the pre-restore backup fails, the restore is aborted before anything destructive happens. All restore actions require typing the instance name as confirmation, same UX as Delete.
+
+If a `convex export` hangs (the well-known `ExportInProgress` lock), the orchestrator marks the row `stuck` after `BACKUP_EXPORT_TIMEOUT_MINUTES` (default 30) and surfaces a "Force restart backend" banner. The button SIGTERMs the backend and respawns it via the supervisor, which releases the lock.
+
+See [`docs/backups.md`](docs/backups.md) for the full operator guide including off-site sync, retention tuning, and recovery playbooks.
+
 ## Architecture
 
 ```

@@ -25,6 +25,23 @@ export const LogsQuerySchema = z.object({
   tail: z.coerce.number().int().min(1).max(10_000).default(100),
 });
 
+// All fields optional so the UI can PATCH any subset. `null` for cron /
+// retention / enabled clears the override back to the orchestrator default.
+export const BackupConfigSchema = z
+  .object({
+    cron: z.string().min(1).nullable().optional(),
+    retentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+    enabled: z.boolean().nullable().optional(),
+  })
+  .strict();
+
+export const RestoreSchema = z.object({
+  backupId: z.string().min(1),
+  confirmName: InstanceNameSchema,
+});
+
 export type CreateInstanceInput = z.infer<typeof CreateInstanceSchema>;
 export type DeleteConfirmInput = z.infer<typeof DeleteConfirmSchema>;
 export type LogsQuery = z.infer<typeof LogsQuerySchema>;
+export type BackupConfigInput = z.infer<typeof BackupConfigSchema>;
+export type RestoreInput = z.infer<typeof RestoreSchema>;

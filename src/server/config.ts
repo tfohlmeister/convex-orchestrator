@@ -66,6 +66,52 @@ const envSchema = z.object({
   // millions of objects from locking up the sampler. 100 pages × 1000 keys =
   // 100k objects per bucket per tick.
   STORAGE_SCAN_PAGE_LIMIT: z.coerce.number().int().min(1).default(100),
+  // ---------------- Backup / restore ----------------
+  // Master switch. When false the scheduler thread doesn't start; manual
+  // /backup + /restore endpoints still work.
+  BACKUP_SCHEDULER_ENABLED: z
+    .string()
+    .transform((v) => v.toLowerCase() !== 'false' && v !== '0')
+    .default('true'),
+  // Default cron expression when an instance has no `backup_cron` override.
+  // Local time. 03:00 daily.
+  BACKUP_DEFAULT_CRON: z.string().default('0 3 * * *'),
+  // Default retention in days for source=auto backups.
+  BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
+  // Cap on concurrent backup jobs across all instances. Convex export is
+  // backend-CPU-heavy; 2 is safe on a homelab box.
+  BACKUP_MAX_CONCURRENT: z.coerce.number().int().min(1).max(20).default(2),
+  // Above this duration in the `running` state, a backup is marked `stuck`
+  // and the UI offers Force-restart-backend. 30 min default.
+  BACKUP_EXPORT_TIMEOUT_MINUTES: z.coerce.number().int().min(1).default(30),
+  // After this many consecutive auto-failures the instance's auto-schedule
+  // is suspended (`backup_suspended=1`). Manual re-enable clears it.
+  BACKUP_MAX_CONSECUTIVE_FAILURES: z.coerce.number().int().min(1).default(3),
+  // Local-time hour at which the retention sweeper runs (0-23). 04:00 puts
+  // it after the 03:00 default cron so the day's new backup is in before
+  // anything gets pruned.
+  BACKUP_RETENTION_HOUR: z.coerce.number().int().min(0).max(23).default(4),
+  // Tick interval for the export-blob orphan cleanup. Hourly default; tasks
+  // are cheap (`readdir` + a stat per file).
+  EXPORT_BLOB_CLEANUP_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
+  // Minimum mtime age before an exports/*.blob is considered orphaned.
+  // Anything younger may belong to an in-flight export. 15 min default.
+  EXPORT_BLOB_CLEANUP_MIN_AGE_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(15 * 60_000),
+  // Working directory for backup zips during export/upload. Sized for the
+  // largest expected backup zip. Defaults under DATA_DIR so it shares the
+  // orchestrator's volume.
+  BACKUP_WORK_DIR: z.string().default(''),
+  // The Convex CLI binary name or absolute path. The runtime image symlinks
+  // /usr/bin/convex to the globally-installed npm package.
+  CONVEX_CLI: z.string().default('convex'),
+  // Each instance's storage directory (where convex-backend writes
+  // exports/*.blob). Templated with the instance name. Default matches the
+  // backend's compiled-in `local_storage` path.
+  CONVEX_STORAGE_DIR_TEMPLATE: z.string().default('/var/lib/orchestrator/storage/{instance}'),
 });
 
 export type Config = z.infer<typeof envSchema> & {
@@ -83,5 +129,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           .filter(Boolean)
       : [],
     sqlitePath: `${parsed.DATA_DIR}/orchestrator.sqlite`,
+    BACKUP_WORK_DIR: parsed.BACKUP_WORK_DIR || `${parsed.DATA_DIR}/backup-work`,
   };
 }

@@ -1,11 +1,16 @@
 import {
   CreateBucketCommand,
   DeleteBucketCommand,
+  DeleteObjectCommand,
   DeleteObjectsCommand,
+  GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
+  PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import type { Readable } from 'node:stream';
 
 export const BUCKET_SUFFIXES = [
   'exports',
@@ -13,7 +18,19 @@ export const BUCKET_SUFFIXES = [
   'modules',
   'files',
   'search',
+  'backups',
 ] as const;
+
+// Buckets sampled by the storage sampler. `backups` is owned by the
+// orchestrator, not the Convex backend, and is excluded from the sampler so
+// backup zips don't inflate the per-instance "storage" chart.
+export const SAMPLED_BUCKET_SUFFIXES = BUCKET_SUFFIXES.filter((s) => s !== 'backups');
+
+export interface BackupListEntry {
+  key: string;
+  sizeBytes: number;
+  lastModified: number;
+}
 
 export interface MinioConfig {
   endpoint: string;
@@ -96,6 +113,86 @@ export class MinioStorage {
 
   config(): MinioConfig {
     return this.cfg;
+  }
+
+  backupBucket(prefix: string): string {
+    return `${prefix}-backups`;
+  }
+
+  async putBackup(
+    prefix: string,
+    key: string,
+    body: Readable | Uint8Array | Buffer,
+    contentLength?: number,
+  ): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.backupBucket(prefix),
+        Key: key,
+        Body: body,
+        ContentType: 'application/zip',
+        ContentLength: contentLength,
+      }),
+    );
+  }
+
+  async headBackup(
+    prefix: string,
+    key: string,
+  ): Promise<{ sizeBytes: number; lastModified: number } | null> {
+    try {
+      const r = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.backupBucket(prefix), Key: key }),
+      );
+      return {
+        sizeBytes: r.ContentLength ?? 0,
+        lastModified: r.LastModified ? r.LastModified.getTime() : 0,
+      };
+    } catch (err: unknown) {
+      if (isNotFound(err)) return null;
+      throw err;
+    }
+  }
+
+  async getBackupStream(prefix: string, key: string): Promise<Readable> {
+    const r = await this.client.send(
+      new GetObjectCommand({ Bucket: this.backupBucket(prefix), Key: key }),
+    );
+    if (!r.Body) {
+      throw new Error(`backup ${key} has empty body`);
+    }
+    return r.Body as Readable;
+  }
+
+  async deleteBackup(prefix: string, key: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.backupBucket(prefix), Key: key }),
+    );
+  }
+
+  async listBackups(prefix: string): Promise<BackupListEntry[]> {
+    const bucket = this.backupBucket(prefix);
+    const out: BackupListEntry[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const res = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          ContinuationToken: continuationToken,
+          MaxKeys: 1000,
+        }),
+      );
+      for (const obj of res.Contents ?? []) {
+        if (!obj.Key) continue;
+        out.push({
+          key: obj.Key,
+          sizeBytes: obj.Size ?? 0,
+          lastModified: obj.LastModified ? obj.LastModified.getTime() : 0,
+        });
+      }
+      continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return out;
   }
 
   // Walk all objects in a single bucket and sum their Size + count. Stops
