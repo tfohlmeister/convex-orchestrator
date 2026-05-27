@@ -52,6 +52,14 @@ export class MinioStorage {
     });
   }
 
+  // Tear down the underlying http connections on graceful shutdown.
+  // Without this, keep-alive sockets to MinIO are only closed when the
+  // process exits — inconsistent with the rest of the structured close
+  // sequence (server, postgres, sqlite).
+  close(): void {
+    this.client.destroy();
+  }
+
   bucketPrefix(instanceName: string): string {
     return instanceName;
   }

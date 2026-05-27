@@ -276,6 +276,8 @@ export async function bootstrap(): Promise<void> {
     backupManager.stop();
     await supervisor.stopAllForShutdown();
     await server.stop();
+    await postgres.close();
+    minio.close();
     db.close();
     process.exit(0);
   };
