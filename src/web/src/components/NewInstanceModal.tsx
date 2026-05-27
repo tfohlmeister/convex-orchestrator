@@ -31,10 +31,13 @@ export function NewInstanceModal({ open, onClose }: Props) {
   const nameValid = NAME_RE.test(name);
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-slate-900 border border-slate-700 rounded-lg p-6 w-[28rem]">
-        <h2 className="text-lg font-semibold mb-4">New instance</h2>
-        <label className="block text-sm text-slate-300 mb-1">Name</label>
+    <div className="fixed inset-0 bg-[rgba(28,25,23,0.45)] backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--color-paper)] border border-[var(--color-rule-strong)] border-t-4 border-t-[var(--color-accent)] rounded-xl p-6 w-[30rem] max-w-full shadow-2xl">
+        <div className="eyebrow mb-2">Create</div>
+        <h2 className="font-serif text-[24px] leading-tight text-[var(--color-ink)] mb-5">
+          New instance
+        </h2>
+        <label className="block text-[12px] text-[var(--color-muted)] mb-1.5">Name</label>
         <input
           autoFocus
           value={name}
@@ -43,37 +46,39 @@ export function NewInstanceModal({ open, onClose }: Props) {
             setError(null);
           }}
           placeholder="masterev-dev"
-          className="w-full bg-slate-800 border border-slate-700 rounded-md px-3 py-2 text-sm font-mono"
+          className="input"
         />
-        <p className="text-xs text-slate-500 mt-1">
+        <p className="text-[11px] text-[var(--color-soft)] mt-1.5">
           lowercase-kebab-case, 3-32 chars, starts with a letter
         </p>
-        {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+        {error && <p className="text-[12px] text-[var(--color-danger)] mt-2">{error}</p>}
         {mutation.isPending && (
-          <ol className="mt-4 space-y-1">
+          <ol className="mt-5 space-y-1.5">
             {STEPS.map((step, idx) => (
-              <li key={step} className="flex items-center gap-2 text-sm text-slate-400">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                Step {idx + 1}: {step}
+              <li
+                key={step}
+                className="flex items-center gap-2.5 text-[12px] text-[var(--color-muted)] font-mono"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
+                <span className="text-[var(--color-soft)] uppercase tracking-wider text-[10px]">
+                  Step {idx + 1}
+                </span>
+                <span>{step}</span>
               </li>
             ))}
-            <li className="text-xs text-slate-500 mt-2">
+            <li className="text-[11px] text-[var(--color-soft)] mt-2 italic font-serif">
               The create flow runs server-side; the page will refresh when ready.
             </li>
           </ol>
         )}
         <div className="flex justify-end gap-2 mt-6">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm text-slate-300 hover:text-white"
-            disabled={mutation.isPending}
-          >
+          <button onClick={onClose} className="btn btn-ghost" disabled={mutation.isPending}>
             Cancel
           </button>
           <button
             onClick={() => mutation.mutate(name)}
             disabled={!nameValid || mutation.isPending}
-            className="px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 rounded-md"
+            className="btn btn-accent"
           >
             {mutation.isPending ? 'Creating…' : 'Create'}
           </button>

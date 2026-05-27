@@ -15,29 +15,24 @@ const DAY_MS = 24 * 60 * 60_000;
 
 function BackupHealthBadge({ instance }: { instance: InstanceListItem }) {
   if (instance.hasStuckBackup) {
-    return (
-      <span className="inline-block px-2 py-0.5 rounded-full text-orange-200 bg-orange-700/40 border border-orange-700/60">
-        stuck
-      </span>
-    );
+    return <span className="pill pill-warn">stuck</span>;
   }
   if (instance.latestBackupStatus === 'failed' && !instance.latestBackupAt) {
-    return (
-      <span className="inline-block px-2 py-0.5 rounded-full text-red-200 bg-red-700/40 border border-red-700/60">
-        failed
-      </span>
-    );
+    return <span className="pill pill-danger">failed</span>;
   }
   if (instance.latestBackupAt == null) {
-    return <span className="text-slate-500">—</span>;
+    return <span className="text-[var(--color-soft)]">—</span>;
   }
   const ageMs = Date.now() - instance.latestBackupAt;
-  let tone = 'text-emerald-300';
-  if (ageMs > 5 * DAY_MS) tone = 'text-red-300';
-  else if (ageMs > 2 * DAY_MS) tone = 'text-amber-300';
+  let tone = 'text-[var(--color-ok)]';
+  if (ageMs > 5 * DAY_MS) tone = 'text-[var(--color-danger)]';
+  else if (ageMs > 2 * DAY_MS) tone = 'text-[var(--color-warn)]';
   return (
-    <span className={`font-mono ${tone}`} title={new Date(instance.latestBackupAt).toISOString()}>
-      {humanAge(ageMs)}
+    <span
+      className={`font-mono text-[12px] ${tone}`}
+      title={new Date(instance.latestBackupAt).toISOString()}
+    >
+      {humanAge(ageMs)} ago
     </span>
   );
 }
@@ -57,53 +52,63 @@ export function InstancesPage() {
   const query = useQuery({ queryKey: ['instances'], queryFn: api.listInstances });
 
   return (
-    <div>
-      <header className="flex items-center justify-between mb-6">
+    <div className="space-y-8">
+      <header className="flex items-end justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Instances</h1>
-          <p className="text-sm text-slate-400">
-            All Convex backends supervised by this orchestrator.
+          <div className="eyebrow mb-2">Fleet</div>
+          <h1 className="font-serif text-[42px] leading-[1.05] text-[var(--color-ink)] tracking-tight">
+            Instances
+          </h1>
+          <p className="text-[13px] text-[var(--color-muted)] mt-2 max-w-md leading-relaxed">
+            All Convex backends supervised by this orchestrator. Click any row to inspect, manage
+            backups, or open the Convex dashboard.
           </p>
         </div>
-        <button
-          onClick={() => setCreateOpen(true)}
-          className="px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 rounded-md"
-        >
-          New instance
+        <button onClick={() => setCreateOpen(true)} className="btn btn-accent">
+          + New instance
         </button>
       </header>
 
-      {query.isLoading && <p className="text-slate-400">Loading…</p>}
-      {query.error && <p className="text-red-400">{(query.error as Error).message}</p>}
+      {query.isLoading && <p className="text-[var(--color-soft)] text-sm">Loading…</p>}
+      {query.error && (
+        <p className="text-[var(--color-danger)] text-sm">{(query.error as Error).message}</p>
+      )}
 
       {query.data && (
-        <table className="w-full border border-slate-800 rounded-lg overflow-hidden">
-          <thead className="bg-slate-900 text-xs uppercase tracking-wide text-slate-400">
-            <tr>
-              <th className="text-left px-4 py-2">Name</th>
-              <th className="text-left px-4 py-2">Status</th>
-              <th className="text-left px-4 py-2">RSS</th>
-              <th className="text-left px-4 py-2">CPU</th>
-              <th className="text-left px-4 py-2">FD</th>
-              <th className="text-left px-4 py-2">Trend (24h)</th>
-              <th className="text-left px-4 py-2">Last backup</th>
-              <th className="text-left px-4 py-2">Host</th>
-              <th className="text-right px-4 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800">
-            {query.data.map((i) => (
-              <Row key={i.name} instance={i} onDelete={() => setDeleteTarget(i.name)} />
-            ))}
-            {query.data.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-4 py-12 text-center text-slate-500">
-                  No instances yet. Click <em>New instance</em> to create one.
-                </td>
+        <div className="card overflow-hidden">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--color-rule)]">
+                <Th>Name</Th>
+                <Th>Status</Th>
+                <Th>RSS</Th>
+                <Th>CPU</Th>
+                <Th>FD</Th>
+                <Th>Trend (24h)</Th>
+                <Th>Last backup</Th>
+                <Th>Host</Th>
+                <Th align="right">Actions</Th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-[var(--color-rule)]">
+              {query.data.map((i) => (
+                <Row key={i.name} instance={i} onDelete={() => setDeleteTarget(i.name)} />
+              ))}
+              {query.data.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-16 text-center">
+                    <div className="font-serif italic text-[22px] text-[var(--color-muted)] mb-1">
+                      No instances yet.
+                    </div>
+                    <div className="text-[13px] text-[var(--color-soft)]">
+                      Click <em className="font-serif">New instance</em> to create one.
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <NewInstanceModal open={createOpen} onClose={() => setCreateOpen(false)} />
@@ -111,6 +116,18 @@ export function InstancesPage() {
         <DeleteConfirmDialog open name={deleteTarget} onClose={() => setDeleteTarget(null)} />
       )}
     </div>
+  );
+}
+
+function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' }) {
+  return (
+    <th
+      className={`px-4 py-3 ${
+        align === 'right' ? 'text-right' : 'text-left'
+      } text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--color-soft)] font-medium`}
+    >
+      {children}
+    </th>
   );
 }
 
@@ -135,42 +152,52 @@ function Row({ instance, onDelete }: { instance: InstanceListItem; onDelete: () 
   const cpu = instance.latestCpuCores != null ? instance.latestCpuCores.toFixed(2) : '—';
 
   return (
-    <tr className="hover:bg-slate-900/60">
-      <td className="px-4 py-3 font-mono text-sm">
-        <Link to={`/instances/${instance.name}`} className="hover:underline">
+    <tr className="hover:bg-[var(--color-paper-2)]/60 transition-colors">
+      <td className="px-4 py-3 font-mono text-[13px]">
+        <Link
+          to={`/instances/${instance.name}`}
+          className="text-[var(--color-ink)] hover:text-[var(--color-accent)] transition-colors"
+        >
           {instance.name}
         </Link>
       </td>
       <td className="px-4 py-3">
         <StatusBadge status={instance.status} />
       </td>
-      <td className="px-4 py-3 text-sm">{rssMb} MB</td>
-      <td className="px-4 py-3 text-sm font-mono">{cpu}</td>
+      <td className="px-4 py-3 text-[13px] font-mono text-[var(--color-ink)]">
+        {rssMb} <span className="text-[var(--color-soft)] text-[11px]">MB</span>
+      </td>
+      <td className="px-4 py-3 text-[13px] font-mono text-[var(--color-ink)]">{cpu}</td>
       <td className="px-4 py-3" title={latestFd != null ? `${latestFd} open fds` : ''}>
         <Sparkline values={fdSparkValues} />
       </td>
       <td className="px-4 py-3">
         <Sparkline values={rssSparkValues} />
       </td>
-      <td className="px-4 py-3 text-xs">
+      <td className="px-4 py-3">
         <BackupHealthBadge instance={instance} />
       </td>
-      <td className="px-4 py-3 text-xs text-slate-400">{instance.cloudHost}</td>
-      <td className="px-4 py-3 text-right text-sm">
+      <td className="px-4 py-3 text-[12px] font-mono text-[var(--color-muted)]">
+        {instance.cloudHost}
+      </td>
+      <td className="px-4 py-3 text-right whitespace-nowrap space-x-4">
         <Link
           to={dashboardEmbedPath(instance.name)}
-          className="text-emerald-400 hover:text-emerald-300 mr-3"
+          className="text-[12px] font-mono uppercase tracking-wider text-[var(--color-accent)] hover:text-[var(--color-accent-soft)] transition-colors"
         >
           Dashboard ↗
         </Link>
         <button
           onClick={() => startStop.mutate()}
           disabled={startStop.isPending || instance.status === 'creating'}
-          className="text-slate-300 hover:text-white mr-3"
+          className="text-[12px] font-mono uppercase tracking-wider text-[var(--color-ink)] hover:text-[var(--color-accent)] transition-colors disabled:opacity-40"
         >
           {instance.status === 'running' ? 'Stop' : 'Start'}
         </button>
-        <button onClick={onDelete} className="text-red-400 hover:text-red-300">
+        <button
+          onClick={onDelete}
+          className="text-[12px] font-mono uppercase tracking-wider text-[var(--color-danger)] hover:opacity-70 transition-opacity"
+        >
           Delete
         </button>
       </td>

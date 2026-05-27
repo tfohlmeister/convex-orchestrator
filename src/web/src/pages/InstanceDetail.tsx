@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Area,
   AreaChart,
+  CartesianGrid,
   Legend,
   Line,
   LineChart,
@@ -19,13 +20,19 @@ import { EndpointsPanel } from '../components/EndpointsPanel';
 import { BackupsSection, BackupSettings } from '../components/BackupsSection';
 
 // Fixed colour + order for the storage breakdown so the legend is stable.
+// Editorial palette: muted earth tones, accent rust as the focal series.
 const STORAGE_SERIES: { suffix: string; colour: string }[] = [
-  { suffix: 'files', colour: '#34d399' },
-  { suffix: 'modules', colour: '#60a5fa' },
-  { suffix: 'exports', colour: '#fbbf24' },
-  { suffix: 'snapshot-imports', colour: '#a78bfa' },
-  { suffix: 'search', colour: '#f472b6' },
+  { suffix: 'files', colour: '#b5523a' },
+  { suffix: 'modules', colour: '#1d4ed8' },
+  { suffix: 'exports', colour: '#b45309' },
+  { suffix: 'snapshot-imports', colour: '#15803d' },
+  { suffix: 'search', colour: '#7c3aed' },
 ];
+
+const CHART_GRID = 'rgba(28, 25, 23, 0.08)';
+const CHART_AXIS = '#78716c';
+const CHART_INK = '#1c1917';
+const CHART_PAPER = '#faf7f2';
 
 interface StoragePoint {
   t: string;
@@ -38,8 +45,6 @@ interface StoragePoint {
 }
 
 function bucketStoragePoints(samples: StorageSample[]): StoragePoint[] {
-  // Storage samples come one row per bucket per tick. Group by takenAt so
-  // each chart point has all five suffixes for proper stacking.
   const byTakenAt = new Map<number, StoragePoint>();
   for (const s of samples) {
     let point = byTakenAt.get(s.takenAt);
@@ -62,24 +67,44 @@ function bucketStoragePoints(samples: StorageSample[]): StoragePoint[] {
   return Array.from(byTakenAt.values()).sort((a, b) => a.takenAt - b.takenAt);
 }
 
+type Tab = 'performance' | 'logs' | 'backups';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'performance', label: 'Performance' },
+  { id: 'logs', label: 'Logs · Audit' },
+  { id: 'backups', label: 'Backups · Settings' },
+];
+
 export function InstanceDetailPage() {
   const { name = '' } = useParams();
+  const [tab, setTab] = useState<Tab>('performance');
   const query = useQuery({
     queryKey: ['instance', name],
     queryFn: () => api.getInstance(name),
     enabled: !!name,
   });
 
-  // Hooks must run unconditionally — derive everything before any early
-  // return, then branch on render output.
   const rawStorageSamples = query.data?.storageSamples;
   const storagePoints = useMemo(
     () => bucketStoragePoints(rawStorageSamples ?? []),
     [rawStorageSamples],
   );
 
-  if (query.isLoading) return <p className="text-slate-400">Loading…</p>;
-  if (query.error) return <p className="text-red-400">{(query.error as Error).message}</p>;
+  if (query.isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-[var(--color-soft)] text-sm">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
+        Loading instance…
+      </div>
+    );
+  }
+  if (query.error) {
+    return (
+      <div className="card-soft p-4 text-[13px] text-[var(--color-danger)]">
+        {(query.error as Error).message}
+      </div>
+    );
+  }
   if (!query.data) return null;
 
   const { instance, samples, storageSamples, audit } = query.data;
@@ -92,184 +117,399 @@ export function InstanceDetailPage() {
   const latestStorageMb =
     instance.latestStorageBytes != null ? instance.latestStorageBytes / 1024 / 1024 : null;
   const hasPartialStorage = storageSamples.some((s) => s.partial);
+  const latestRssMb = samples.at(-1)?.rssKb != null ? samples.at(-1)!.rssKb / 1024 : null;
+  const latestCpu = instance.latestCpuCores;
+  const latestFd = samples.at(-1)?.fdCount ?? null;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <Link to="/instances" className="text-sm text-slate-500 hover:text-slate-300">
-          ← All instances
+    <div className="space-y-8">
+      {/* ------------ Header ------------ */}
+      <header className="space-y-5">
+        <Link
+          to="/instances"
+          className="text-[11px] font-mono uppercase tracking-[0.14em] text-[var(--color-soft)] hover:text-[var(--color-ink)] transition-colors inline-flex items-center gap-1.5"
+        >
+          <span>←</span>
+          <span>All instances</span>
         </Link>
-        <h1 className="text-2xl font-semibold mt-1 flex items-center gap-3">
-          <span className="font-mono">{instance.name}</span>
-          <StatusBadge status={instance.status} />
-        </h1>
-        <p className="text-sm text-slate-400 mt-1">
-          <Link
-            to={dashboardEmbedPath(instance.name)}
-            className="text-emerald-400 hover:text-emerald-300 underline"
-          >
-            Open in Convex Dashboard ↗
+
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="eyebrow mb-2">Instance</div>
+            <h1 className="font-serif text-[42px] leading-[1.05] text-[var(--color-ink)] tracking-tight flex items-baseline gap-4 flex-wrap">
+              <span className="font-mono text-[34px] font-medium">{instance.name}</span>
+              <StatusBadge status={instance.status} />
+            </h1>
+          </div>
+          <Link to={dashboardEmbedPath(instance.name)} className="btn btn-primary">
+            Open Convex Dashboard
+            <span className="text-[var(--color-paper-3)] ml-0.5">↗</span>
           </Link>
-        </p>
+        </div>
+
         {instance.lastError && (
-          <p className="text-sm text-red-400 mt-2">Last error: {instance.lastError}</p>
+          <div className="card-soft p-3 text-[13px] text-[var(--color-danger)] border-[color:rgba(185,28,28,0.25)]">
+            <span className="eyebrow text-[var(--color-danger)] mr-2">Last error</span>
+            {instance.lastError}
+          </div>
+        )}
+
+        {/* At-a-glance metrics — visible above the fold regardless of tab */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatTile
+            label="RSS"
+            value={latestRssMb != null ? `${latestRssMb.toFixed(0)}` : '—'}
+            unit="MB"
+          />
+          <StatTile
+            label="CPU"
+            value={latestCpu != null ? latestCpu.toFixed(2) : '—'}
+            unit="cores"
+          />
+          <StatTile label="FDs" value={latestFd != null ? String(latestFd) : '—'} unit="open" />
+          <StatTile
+            label="Storage"
+            value={latestStorageMb != null ? `${latestStorageMb.toFixed(1)}` : '—'}
+            unit="MB"
+            partial={hasPartialStorage}
+          />
+        </div>
+
+        <EndpointsPanel cloudUrl={instance.cloudUrl} siteUrl={instance.siteUrl} />
+        <ConnectionPanel cloudUrl={instance.cloudUrl} adminKey={instance.adminKey} />
+      </header>
+
+      {/* ------------ Tab bar ------------ */}
+      <nav className="border-b border-[var(--color-rule)] sticky top-0 bg-[var(--color-paper)]/85 backdrop-blur-md z-10 -mx-6 md:-mx-10 px-6 md:px-10">
+        <div className="flex gap-8 overflow-x-auto">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className="tab whitespace-nowrap"
+              data-active={tab === t.id ? 'true' : 'false'}
+              onClick={() => setTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {/* ------------ Tab content ------------ */}
+      {tab === 'performance' && (
+        <PerformancePanel
+          chartData={chartData}
+          cpuPointCount={cpuPointCount}
+          storagePoints={storagePoints}
+          hasPartialStorage={hasPartialStorage}
+          latestStorageMb={latestStorageMb}
+        />
+      )}
+      {tab === 'logs' && <LogsAuditPanel name={instance.name} audit={audit} />}
+      {tab === 'backups' && (
+        <div className="space-y-8">
+          <BackupsSection instanceName={instance.name} hasStuckBackup={instance.hasStuckBackup} />
+          <BackupSettings
+            instanceName={instance.name}
+            initial={{
+              backupCron: instance.backupCron,
+              backupRetentionDays: instance.backupRetentionDays,
+              backupEnabled: instance.backupEnabled,
+              backupSuspended: instance.backupSuspended,
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  unit,
+  partial,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  partial?: boolean;
+}) {
+  return (
+    <div className="card-soft p-4">
+      <div className="eyebrow flex items-center gap-1.5">
+        {label}
+        {partial && (
+          <span
+            className="text-[var(--color-warn)] normal-case tracking-normal"
+            title="ListObjectsV2 page cap hit on at least one bucket; numbers are a lower bound"
+          >
+            ⚠
+          </span>
         )}
       </div>
+      <div className="mt-2 flex items-baseline gap-1.5">
+        <span className="font-serif text-[30px] leading-none text-[var(--color-ink)]">{value}</span>
+        <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--color-soft)]">
+          {unit}
+        </span>
+      </div>
+    </div>
+  );
+}
 
-      <EndpointsPanel cloudUrl={instance.cloudUrl} siteUrl={instance.siteUrl} />
+function PerformancePanel({
+  chartData,
+  cpuPointCount,
+  storagePoints,
+  hasPartialStorage,
+  latestStorageMb,
+}: {
+  chartData: { t: string; rssMb: number; cpuCores: number | null }[];
+  cpuPointCount: number;
+  storagePoints: StoragePoint[];
+  hasPartialStorage: boolean;
+  latestStorageMb: number | null;
+}) {
+  return (
+    <div className="space-y-6">
+      <ChartCard title="RSS · last 24h" subtitle="megabytes">
+        {chartData.length > 1 ? (
+          <ResponsiveContainer>
+            <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={CHART_GRID} vertical={false} />
+              <XAxis dataKey="t" stroke={CHART_AXIS} fontSize={10} tickMargin={6} />
+              <YAxis
+                stroke={CHART_AXIS}
+                fontSize={10}
+                domain={['dataMin - 5', 'dataMax + 5']}
+                allowDecimals={false}
+                width={42}
+              />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                labelStyle={{ color: CHART_INK, fontSize: 11 }}
+                itemStyle={{ color: CHART_INK }}
+                formatter={(v: number) => `${v.toFixed(1)} MB`}
+              />
+              <Line
+                type="monotone"
+                dataKey="rssMb"
+                stroke="#b5523a"
+                strokeWidth={1.5}
+                dot={false}
+                activeDot={{ r: 4, fill: '#b5523a' }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyChart label="Not enough samples yet (need 2+)." />
+        )}
+      </ChartCard>
 
-      <ConnectionPanel cloudUrl={instance.cloudUrl} adminKey={instance.adminKey} />
+      <ChartCard title="CPU · last 24h" subtitle="cores">
+        {cpuPointCount >= 2 ? (
+          <ResponsiveContainer>
+            <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={CHART_GRID} vertical={false} />
+              <XAxis dataKey="t" stroke={CHART_AXIS} fontSize={10} tickMargin={6} />
+              <YAxis
+                stroke={CHART_AXIS}
+                fontSize={10}
+                domain={['dataMin - 0.05', 'dataMax + 0.05']}
+                allowDecimals
+                tickFormatter={(v: number) => v.toFixed(2)}
+                width={42}
+              />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                labelStyle={{ color: CHART_INK, fontSize: 11 }}
+                itemStyle={{ color: CHART_INK }}
+                formatter={(value: number) => value.toFixed(3)}
+              />
+              <Line
+                type="monotone"
+                dataKey="cpuCores"
+                stroke="#1d4ed8"
+                strokeWidth={1.5}
+                dot={false}
+                connectNulls={false}
+                activeDot={{ r: 4, fill: '#1d4ed8' }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyChart label="Not enough samples yet (need 2+)." />
+        )}
+      </ChartCard>
 
-      <section>
-        <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">RSS (MB) · last 24h</h2>
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 h-64">
-          {chartData.length > 1 ? (
-            <ResponsiveContainer>
-              <LineChart data={chartData}>
-                <XAxis dataKey="t" stroke="#475569" fontSize={10} />
-                <YAxis
-                  stroke="#475569"
-                  fontSize={10}
-                  domain={['dataMin - 5', 'dataMax + 5']}
-                  allowDecimals={false}
-                />
-                <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} />
-                <Line
-                  type="monotone"
-                  dataKey="rssMb"
-                  stroke="#34d399"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-slate-500 text-sm">Not enough samples yet (need 2+).</p>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">
-          CPU (cores) · last 24h
-        </h2>
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 h-64">
-          {cpuPointCount >= 2 ? (
-            <ResponsiveContainer>
-              <LineChart data={chartData}>
-                <XAxis dataKey="t" stroke="#475569" fontSize={10} />
-                <YAxis
-                  stroke="#475569"
-                  fontSize={10}
-                  domain={['dataMin - 0.05', 'dataMax + 0.05']}
-                  allowDecimals={true}
-                  tickFormatter={(v: number) => v.toFixed(2)}
-                />
-                <Tooltip
-                  contentStyle={{ background: '#0f172a', border: '1px solid #334155' }}
-                  formatter={(value: number) => value.toFixed(3)}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="cpuCores"
-                  stroke="#60a5fa"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-slate-500 text-sm">Not enough samples yet (need 2+).</p>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm uppercase tracking-wide text-slate-400 flex items-center gap-2">
-            Storage · per bucket (last 24h)
+      <ChartCard
+        title="Storage · per bucket"
+        subtitle="last 24h, megabytes"
+        right={
+          <div className="flex items-center gap-3">
             {hasPartialStorage && (
               <span
-                className="text-amber-400"
+                className="pill pill-warn"
                 title="ListObjectsV2 page cap hit on at least one bucket; numbers are a lower bound"
               >
-                ⚠
+                partial
               </span>
             )}
-          </h2>
-          {latestStorageMb != null && (
-            <span className="text-xs text-slate-500 font-mono">
-              Total: {latestStorageMb.toFixed(1)} MB
-            </span>
+            {latestStorageMb != null && (
+              <span className="text-[12px] font-mono text-[var(--color-muted)]">
+                Total: {latestStorageMb.toFixed(1)} MB
+              </span>
+            )}
+          </div>
+        }
+      >
+        {storagePoints.length >= 1 ? (
+          <ResponsiveContainer>
+            <AreaChart data={storagePoints} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={CHART_GRID} vertical={false} />
+              <XAxis dataKey="t" stroke={CHART_AXIS} fontSize={10} tickMargin={6} />
+              <YAxis
+                stroke={CHART_AXIS}
+                fontSize={10}
+                domain={['dataMin - 5', 'dataMax + 5']}
+                tickFormatter={(v: number) => v.toFixed(0)}
+                width={42}
+              />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                labelStyle={{ color: CHART_INK, fontSize: 11 }}
+                itemStyle={{ color: CHART_INK }}
+                formatter={(value: number) => `${value.toFixed(2)} MB`}
+              />
+              <Legend wrapperStyle={{ fontSize: 10, color: CHART_INK }} iconType="square" />
+              {STORAGE_SERIES.map((s) => (
+                <Area
+                  key={s.suffix}
+                  type="monotone"
+                  dataKey={s.suffix}
+                  stackId="storage"
+                  stroke={s.colour}
+                  fill={s.colour}
+                  fillOpacity={0.18}
+                  strokeWidth={1.2}
+                />
+              ))}
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <EmptyChart label="No storage samples yet (first tick in ≤5 min)." />
+        )}
+      </ChartCard>
+    </div>
+  );
+}
+
+const tooltipStyle: React.CSSProperties = {
+  background: CHART_PAPER,
+  border: '1px solid rgba(28, 25, 23, 0.18)',
+  borderRadius: 8,
+  fontSize: 12,
+  fontFamily: 'Geist Mono, ui-monospace, monospace',
+  boxShadow: '0 6px 24px rgba(28, 25, 23, 0.08)',
+};
+
+function ChartCard({
+  title,
+  subtitle,
+  right,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="flex items-baseline justify-between mb-3 gap-3 flex-wrap">
+        <div>
+          <div className="eyebrow">{title}</div>
+          {subtitle && (
+            <div className="text-[11px] font-mono text-[var(--color-soft)] mt-0.5">{subtitle}</div>
           )}
         </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 h-64">
-          {storagePoints.length >= 1 ? (
-            <ResponsiveContainer>
-              <AreaChart data={storagePoints}>
-                <XAxis dataKey="t" stroke="#475569" fontSize={10} />
-                <YAxis
-                  stroke="#475569"
-                  fontSize={10}
-                  domain={['dataMin - 5', 'dataMax + 5']}
-                  tickFormatter={(v: number) => v.toFixed(0)}
-                />
-                <Tooltip
-                  contentStyle={{ background: '#0f172a', border: '1px solid #334155' }}
-                  formatter={(value: number) => `${value.toFixed(2)} MB`}
-                />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                {STORAGE_SERIES.map((s) => (
-                  <Area
-                    key={s.suffix}
-                    type="monotone"
-                    dataKey={s.suffix}
-                    stackId="storage"
-                    stroke={s.colour}
-                    fill={s.colour}
-                    fillOpacity={0.4}
-                  />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
+        {right}
+      </div>
+      <div className="card p-4 h-64">{children}</div>
+    </section>
+  );
+}
+
+function EmptyChart({ label }: { label: string }) {
+  return (
+    <div className="h-full flex items-center justify-center text-center">
+      <p className="text-[var(--color-soft)] text-[13px] font-serif italic">{label}</p>
+    </div>
+  );
+}
+
+function LogsAuditPanel({
+  name,
+  audit,
+}: {
+  name: string;
+  audit: { at: number; action: string; actor: string; details?: string | null }[];
+}) {
+  return (
+    <div className="space-y-8">
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="eyebrow">Logs · stdout · live</div>
+            <div className="text-[11px] font-mono text-[var(--color-soft)] mt-0.5">
+              tailed from the backend process
+            </div>
+          </div>
+          <span className="pill pill-ok pulse-dot">live</span>
+        </div>
+        <LogTail name={name} />
+      </section>
+
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="eyebrow">Audit</div>
+            <div className="text-[11px] font-mono text-[var(--color-soft)] mt-0.5">
+              every state-changing action on this instance
+            </div>
+          </div>
+          <span className="text-[12px] font-mono text-[var(--color-soft)]">
+            {audit.length} {audit.length === 1 ? 'entry' : 'entries'}
+          </span>
+        </div>
+        <div className="card overflow-hidden">
+          {audit.length === 0 ? (
+            <p className="px-4 py-10 text-center text-[var(--color-soft)] text-[13px] font-serif italic">
+              No audit entries yet.
+            </p>
           ) : (
-            <p className="text-slate-500 text-sm">No storage samples yet (first tick in ≤5 min).</p>
+            <ul className="divide-y divide-[var(--color-rule)]">
+              {audit.map((a, idx) => (
+                <li
+                  key={idx}
+                  className="px-4 py-2.5 flex gap-4 text-[12px] font-mono hover:bg-[var(--color-paper-2)]/50 transition-colors"
+                >
+                  <span className="text-[var(--color-soft)] shrink-0 w-52">
+                    {new Date(a.at).toISOString()}
+                  </span>
+                  <span className="text-[var(--color-accent)] shrink-0 w-40 truncate">
+                    {a.action}
+                  </span>
+                  <span className="text-[var(--color-ink)] shrink-0 w-32 truncate">{a.actor}</span>
+                  {a.details && (
+                    <span className="text-[var(--color-muted)] truncate flex-1">{a.details}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">Logs (stdout, live)</h2>
-        <LogTail name={instance.name} />
-      </section>
-
-      <BackupsSection instanceName={instance.name} hasStuckBackup={instance.hasStuckBackup} />
-
-      <BackupSettings
-        instanceName={instance.name}
-        initial={{
-          backupCron: instance.backupCron,
-          backupRetentionDays: instance.backupRetentionDays,
-          backupEnabled: instance.backupEnabled,
-          backupSuspended: instance.backupSuspended,
-        }}
-      />
-
-      <section>
-        <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">Audit</h2>
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <ul className="space-y-1 text-xs font-mono">
-            {audit.map((a, idx) => (
-              <li key={idx} className="flex gap-3">
-                <span className="text-slate-500">{new Date(a.at).toISOString()}</span>
-                <span className="text-amber-300">{a.action}</span>
-                <span className="text-slate-300">{a.actor}</span>
-                {a.details && <span className="text-slate-500">{a.details}</span>}
-              </li>
-            ))}
-            {audit.length === 0 && <li className="text-slate-500">No audit entries.</li>}
-          </ul>
         </div>
       </section>
     </div>
@@ -312,9 +552,9 @@ function LogTail({ name }: { name: string }) {
   return (
     <pre
       ref={ref}
-      className="bg-slate-950 border border-slate-800 rounded-lg p-3 h-72 overflow-auto text-xs font-mono text-slate-300 whitespace-pre-wrap"
+      className="bg-[#1c1917] text-[#e7e5e4] border border-[var(--color-rule-strong)] rounded-xl p-4 h-80 overflow-auto text-[12px] font-mono leading-relaxed whitespace-pre-wrap"
     >
-      {lines || 'Waiting for log lines…'}
+      {lines || <span className="text-[#a8a29e] italic font-serif">Waiting for log lines…</span>}
     </pre>
   );
 }

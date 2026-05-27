@@ -41,8 +41,14 @@ export function DashboardEmbedPage() {
     return () => window.removeEventListener('message', handler);
   }, [query.data]);
 
-  if (query.isLoading) return <p className="text-slate-400 p-6">Loading…</p>;
-  if (query.error) return <p className="text-red-400 p-6">{(query.error as Error).message}</p>;
+  if (query.isLoading) {
+    return <p className="text-[var(--color-soft)] text-sm p-6">Loading…</p>;
+  }
+  if (query.error) {
+    return (
+      <p className="text-[var(--color-danger)] text-sm p-6">{(query.error as Error).message}</p>
+    );
+  }
   if (!query.data) return null;
 
   // Reuse the scheme + port the user came in on, so the iframe lands on the
@@ -51,14 +57,36 @@ export function DashboardEmbedPage() {
   const dashboardOrigin = `${window.location.protocol}//dashboard.${query.data.instance.baseDomain}${port}`;
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-slate-950">
-      <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-800 text-xs text-slate-400">
-        <Link to="/instances" className="hover:text-slate-200">
-          ← Instances
+    <div className="fixed inset-0 flex flex-col bg-[var(--color-paper)]">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-[var(--color-rule)] bg-[var(--color-paper)]/85 backdrop-blur-md">
+        <Link
+          to="/instances"
+          className="text-[11px] font-mono uppercase tracking-[0.14em] text-[var(--color-soft)] hover:text-[var(--color-ink)] transition-colors"
+        >
+          Instances
         </Link>
-        <span className="text-slate-600">/</span>
-        <span className="font-mono text-slate-200">{name}</span>
-        <span className="ml-auto text-slate-600">
+        <span className="text-[var(--color-soft)]/50">/</span>
+        <Link
+          to={`/instances/${name}`}
+          className="text-[13px] font-mono text-[var(--color-soft)] hover:text-[var(--color-ink)] transition-colors"
+        >
+          {name}
+        </Link>
+        <span className="text-[var(--color-soft)]/50">/</span>
+        <span className="text-[11px] font-mono uppercase tracking-[0.14em] text-[var(--color-ink)] relative">
+          Dashboard
+          <span
+            aria-hidden
+            className="absolute left-0 right-0 -bottom-[9px] h-[2px] bg-[var(--color-accent)] rounded"
+          />
+        </span>
+        <span className="ml-auto text-[10px] font-mono uppercase tracking-[0.14em] text-[var(--color-soft)] flex items-center gap-2">
+          <span
+            aria-hidden
+            className={`inline-block w-1.5 h-1.5 rounded-full ${
+              ready ? 'bg-[var(--color-ok)]' : 'bg-[var(--color-warn)] animate-pulse'
+            }`}
+          />
           {ready ? 'credentials handed off' : 'waiting for iframe handshake…'}
         </span>
       </div>

@@ -6,7 +6,7 @@ interface Props {
 
 export function Sparkline({ values, width = 80, height = 24 }: Props) {
   if (values.length < 2) {
-    return <span className="text-slate-500 text-xs">—</span>;
+    return <span className="text-[var(--color-soft)] text-xs">—</span>;
   }
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -20,9 +20,10 @@ export function Sparkline({ values, width = 80, height = 24 }: Props) {
       <polyline
         points={points}
         fill="none"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        className="text-emerald-400"
+        stroke="var(--color-accent)"
+        strokeWidth={1.4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );

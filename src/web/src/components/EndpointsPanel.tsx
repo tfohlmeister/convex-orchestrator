@@ -8,31 +8,38 @@ interface Props {
 // Surfaces both Convex origins for this instance. The cloud URL is the API
 // origin (`api.*`, queries/mutations, websockets) and matches CONVEX_URL.
 // The site URL is the HTTP Actions origin (`httpAction` routes mounted on
-// `/`); Convex split them to keep CORS surfaces separate. Without this
-// panel the site URL was reachable but invisible to the user — see the
-// instance row's `siteHost` field used to be the only hint.
+// `/`); Convex split them to keep CORS surfaces separate.
 export function EndpointsPanel({ cloudUrl, siteUrl }: Props) {
   return (
     <section>
-      <h2 className="text-sm uppercase tracking-wide text-slate-400 mb-2">Endpoints</h2>
-      <div className="bg-slate-900 border border-slate-800 rounded-lg divide-y divide-slate-800">
-        <Row label="API (CONVEX_URL)" url={cloudUrl} />
-        <Row label="HTTP Actions" url={siteUrl} />
+      <SectionHeading>Endpoints</SectionHeading>
+      <div className="card divide-y divide-[var(--color-rule)]">
+        <Row label="API" sublabel="CONVEX_URL" url={cloudUrl} />
+        <Row label="HTTP Actions" sublabel="httpAction routes" url={siteUrl} />
       </div>
     </section>
   );
 }
 
-function Row({ label, url }: { label: string; url: string }) {
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return <h2 className="eyebrow mb-3">{children}</h2>;
+}
+
+function Row({ label, sublabel, url }: { label: string; sublabel: string; url: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5">
-      <span className="text-xs text-slate-500 w-40 shrink-0">{label}</span>
+    <div className="flex items-center gap-4 px-4 py-3">
+      <div className="w-40 shrink-0">
+        <div className="text-[13px] text-[var(--color-ink)] font-medium leading-tight">{label}</div>
+        <div className="text-[10px] font-mono text-[var(--color-soft)] tracking-wide uppercase mt-0.5">
+          {sublabel}
+        </div>
+      </div>
       <a
         href={url}
         target="_blank"
         rel="noreferrer"
-        className="text-sm font-mono text-slate-200 hover:text-emerald-300 truncate flex-1"
+        className="text-[13px] font-mono text-[var(--color-ink)] hover:text-[var(--color-accent)] truncate flex-1 transition-colors"
       >
         {url}
       </a>
@@ -44,7 +51,7 @@ function Row({ label, url }: { label: string; url: string }) {
             setTimeout(() => setCopied(false), 1500);
           });
         }}
-        className="text-xs text-slate-500 hover:text-slate-300"
+        className="text-[11px] font-mono uppercase tracking-wider text-[var(--color-soft)] hover:text-[var(--color-ink)] transition-colors"
       >
         {copied ? 'Copied' : 'Copy'}
       </button>
