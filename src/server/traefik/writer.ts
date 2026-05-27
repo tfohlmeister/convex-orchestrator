@@ -77,7 +77,7 @@ export class TraefikWriter {
     // Signal "no per-instance file" by returning null; commit() unlinks
     // the output file instead of writing a placeholder.
     if (Object.keys(routers).length === 0) return null;
-    return toYaml({ http: { routers, services } });
+    return renderTraefikYaml(routers, services);
   }
 
   async commit(): Promise<void> {
@@ -87,7 +87,6 @@ export class TraefikWriter {
 
   private async doCommit(): Promise<void> {
     const content = this.render();
-    await mkdir(dirname(this.cfg.outputPath), { recursive: true });
     if (content === null) {
       try {
         await unlink(this.cfg.outputPath);
@@ -96,9 +95,7 @@ export class TraefikWriter {
       }
       return;
     }
-    const tmp = `${this.cfg.outputPath}.tmp.${process.pid}.${Date.now()}`;
-    await writeFile(tmp, content, 'utf8');
-    await rename(tmp, this.cfg.outputPath);
+    await writeAtomicYaml(this.cfg.outputPath, content);
   }
 
   private sortedRoutes(): RouteSpec[] {
@@ -106,6 +103,53 @@ export class TraefikWriter {
       a.instanceName.localeCompare(b.instanceName),
     );
   }
+}
+
+// Atomic-rename file writer shared between the per-instance TraefikWriter
+// commits and the boot-time self-routes write in index.ts. Lives here so
+// the latter doesn't have to reimplement temp-file + rename + mkdir
+// (which it used to, with the same gotchas).
+export async function writeAtomicYaml(outputPath: string, content: string): Promise<void> {
+  await mkdir(dirname(outputPath), { recursive: true });
+  const tmp = `${outputPath}.tmp.${process.pid}.${Date.now()}`;
+  await writeFile(tmp, content, 'utf8');
+  await rename(tmp, outputPath);
+}
+
+// Build YAML from a `{ http: { routers, services } }` shape. Exported so
+// callers that produce static routers + services (e.g. the orchestrator
+// self-routes for orchestrator.* + dashboard.*) reuse the same serializer
+// instead of string-templating their own.
+export function renderTraefikYaml(
+  routers: Record<string, unknown>,
+  services: Record<string, unknown>,
+): string {
+  return toYaml({ http: { routers, services } });
+}
+
+// Per-router options the self-routes builder threads in.
+export interface BuildRouterOpts {
+  rule: string;
+  entryPoint: string;
+  service: string;
+  certResolver: string;
+}
+
+// Shape-match the per-instance router so both callers produce identical
+// YAML (one place to touch when the router schema needs to change).
+export function buildRouter({
+  rule,
+  entryPoint,
+  service,
+  certResolver,
+}: BuildRouterOpts): Record<string, unknown> {
+  const isHttps = entryPoint !== 'web';
+  return {
+    rule,
+    entryPoints: [entryPoint],
+    service,
+    ...(isHttps ? { tls: certResolver ? { certResolver } : {} } : {}),
+  };
 }
 
 function toYaml(value: unknown, indent = 0): string {
