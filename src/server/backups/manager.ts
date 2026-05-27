@@ -27,6 +27,10 @@ export interface BackupManagerDeps {
 }
 
 interface QueuedJob {
+  // Backup row id, pre-allocated by the enqueueing caller so the API
+  // response and the audit log carry the same id the row will eventually
+  // have. The worker uses this id when inserting the row.
+  id: string;
   instance: Instance;
   source: 'auto' | 'manual' | 'pre-restore';
   // For pre-restore: resolve once complete (success path), reject on failure.
@@ -109,7 +113,12 @@ export class BackupManager {
   // status changes are observable via BackupRepo.
   enqueueManual(instance: Instance, actor: string): string {
     const id = this.allocateId();
-    this.queue.push({ instance, source: 'manual', triggerReason: `manual by ${actor}` });
+    this.queue.push({
+      id,
+      instance,
+      source: 'manual',
+      triggerReason: `manual by ${actor}`,
+    });
     this.deps.audit.record({
       at: Date.now(),
       actor,
@@ -124,8 +133,10 @@ export class BackupManager {
   // Synchronous pre-restore backup. The restore flow waits for it; if it
   // fails the whole restore is aborted with the failure reason.
   async runPreRestoreBackup(instance: Instance, actor: string): Promise<Backup> {
+    const id = this.allocateId();
     return new Promise((resolve, reject) => {
       this.queue.unshift({
+        id,
         instance,
         source: 'pre-restore',
         triggerReason: `pre-restore by ${actor}`,
@@ -137,7 +148,7 @@ export class BackupManager {
         actor,
         action: 'backup_started',
         instanceName: instance.name,
-        details: 'source=pre-restore',
+        details: `source=pre-restore id=${id}`,
       });
       void this.tryDrainQueue();
     });
@@ -194,6 +205,7 @@ export class BackupManager {
       if (next <= now) {
         // Due — enqueue an auto backup and advance to the following fire.
         this.queue.push({
+          id: this.allocateId(),
           instance: inst,
           source: 'auto',
           triggerReason: `cron ${expr.raw}`,
@@ -228,7 +240,7 @@ export class BackupManager {
   }
 
   private async runJob(job: QueuedJob): Promise<void> {
-    const id = this.allocateId();
+    const id = job.id;
     const startedAt = Date.now();
     const tempPath = join(this.deps.config.BACKUP_WORK_DIR, `${job.instance.name}_${id}.zip`);
     await mkdir(this.deps.config.BACKUP_WORK_DIR, { recursive: true });
