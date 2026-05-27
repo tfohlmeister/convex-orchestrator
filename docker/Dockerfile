@@ -14,7 +14,7 @@ ARG CONVEX_DASHBOARD_SHA256=cb730167425cffc69aecc7a0d1708067726734b213f5832b0d94
 # ---------- Stage 1: web build ----------
 FROM oven/bun:1.3 AS web-build
 WORKDIR /app
-COPY package.json bun.lockb* ./
+COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile || bun install
 COPY tsconfig.json eslint.config.js ./
 COPY src ./src
@@ -23,7 +23,7 @@ RUN bun run build:web
 # ---------- Stage 2: server build ----------
 FROM oven/bun:1.3 AS server-build
 WORKDIR /app
-COPY package.json bun.lockb* ./
+COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile || bun install
 COPY tsconfig.json ./
 COPY src/server ./src/server
