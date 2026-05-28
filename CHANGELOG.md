@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Pre-restore backup no longer dies at the convex CLI login prompt.**
+  The container shipped Convex CLI `1.18.2`, which ignored the
+  `CONVEX_SELF_HOSTED_URL` + `CONVEX_SELF_HOSTED_ADMIN_KEY` env vars
+  and fell through to "Cannot prompt for input in non-interactive
+  terminals" on every `convex export` invocation, blocking every
+  scheduled and restore-from-upload pre-restore backup. Bumped to
+  `1.36.1`, which honours the self-hosted env vars cleanly.
+
 ### Added
 
 - **Display name, distinct from the URL slug.** Instances now carry an

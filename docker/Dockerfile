@@ -109,7 +109,13 @@ FROM oven/bun:1.3-slim AS runtime
 # `convex export` / `convex import` against each instance. Pinned via Renovate
 # (npm:convex). Node.js + npm are required because `npx convex` shells out
 # to node — Bun cannot run the CLI directly.
-ARG CONVEX_CLI_VERSION=1.18.2
+# Pin > 1.20 so the CLI honours CONVEX_SELF_HOSTED_URL +
+# CONVEX_SELF_HOSTED_ADMIN_KEY without falling through to its interactive
+# login prompt (the 1.18 build attempts to prompt and dies with
+# "Cannot prompt for input in non-interactive terminals" when called for
+# pre-restore backups). 1.36.1 is the version we've manually verified
+# against a real instance end-to-end.
+ARG CONVEX_CLI_VERSION=1.36.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl tini libpq5 nodejs npm \
     && npm install -g --no-fund --no-audit "convex@${CONVEX_CLI_VERSION}" \
