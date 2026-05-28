@@ -387,3 +387,126 @@ describe('mutating endpoint guards', () => {
     expect(body.code).toBe('CONFIRMATION_MISMATCH');
   });
 });
+
+describe('display name routes', () => {
+  function buildApp(overrides?: {
+    onCreate?: (name: string, actor: string, displayName: string | null) => Promise<unknown>;
+    onSetDisplayName?: (name: string, displayName: string | null, actor: string) => void;
+  }) {
+    const orchestrator = {
+      create:
+        overrides?.onCreate ?? (async () => ({ name: 'x', displayName: null, status: 'creating' })),
+      setDisplayName: overrides?.onSetDisplayName ?? (() => undefined),
+    } as unknown as RouteDeps['orchestrator'];
+    const config = {
+      ORCHESTRATOR_ADMIN_TOKEN: '',
+      EXTERNAL_SCHEME: 'http',
+      EXTERNAL_PORT_SUFFIX: '',
+      BASE_DOMAIN: 'cvx.lan',
+    } as unknown as Config;
+    return buildRoutes({
+      orchestrator,
+      config,
+      samples: {} as unknown as RouteDeps['samples'],
+      storage: {} as unknown as RouteDeps['storage'],
+      audit: { record: () => undefined } as unknown as RouteDeps['audit'],
+      backups: {} as unknown as RouteDeps['backups'],
+      backupManager: {} as unknown as RouteDeps['backupManager'],
+      restoreManager: {} as unknown as RouteDeps['restoreManager'],
+      minio: {} as unknown as RouteDeps['minio'],
+      ready: () => true,
+    });
+  }
+
+  test('POST /api/instances accepts displayName', async () => {
+    const calls: Array<{ name: string; displayName: string | null }> = [];
+    const app = buildApp({
+      onCreate: async (name, _actor, displayName) => {
+        calls.push({ name, displayName });
+        return { name, displayName, status: 'creating' };
+      },
+    });
+    const res = await app.request('/api/instances', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'lucky-otter-123', displayName: 'My App' }),
+    });
+    expect(res.status).toBe(201);
+    expect(calls).toEqual([{ name: 'lucky-otter-123', displayName: 'My App' }]);
+  });
+
+  test('POST /api/instances without displayName persists null', async () => {
+    const calls: Array<{ displayName: string | null }> = [];
+    const app = buildApp({
+      onCreate: async (name, _actor, displayName) => {
+        calls.push({ displayName });
+        return { name, displayName, status: 'creating' };
+      },
+    });
+    const res = await app.request('/api/instances', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'lucky-otter-123' }),
+    });
+    expect(res.status).toBe(201);
+    expect(calls).toEqual([{ displayName: null }]);
+  });
+
+  test('POST /api/instances normalises empty/whitespace displayName to null', async () => {
+    const calls: Array<{ displayName: string | null }> = [];
+    const app = buildApp({
+      onCreate: async (name, _actor, displayName) => {
+        calls.push({ displayName });
+        return { name, displayName, status: 'creating' };
+      },
+    });
+    await app.request('/api/instances', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'lucky-otter-123', displayName: '   ' }),
+    });
+    expect(calls[0]?.displayName).toBeNull();
+  });
+
+  test('PATCH /api/instances/:name/display-name passes through trimmed value', async () => {
+    const calls: Array<{ displayName: string | null }> = [];
+    const app = buildApp({
+      onSetDisplayName: (_name, displayName) => {
+        calls.push({ displayName });
+      },
+    });
+    const res = await app.request('/api/instances/lucky-otter-123/display-name', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: '  My App  ' }),
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ displayName: 'My App' }]);
+  });
+
+  test('PATCH /api/instances/:name/display-name with empty string clears to null', async () => {
+    const calls: Array<{ displayName: string | null }> = [];
+    const app = buildApp({
+      onSetDisplayName: (_name, displayName) => {
+        calls.push({ displayName });
+      },
+    });
+    const res = await app.request('/api/instances/lucky-otter-123/display-name', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: '' }),
+    });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ displayName: null }]);
+  });
+
+  test('PATCH rejects displayName over 64 chars', async () => {
+    const app = buildApp();
+    const res = await app.request('/api/instances/lucky-otter-123/display-name', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: 'a'.repeat(65) }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

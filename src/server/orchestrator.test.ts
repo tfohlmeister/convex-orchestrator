@@ -297,6 +297,7 @@ describe('Orchestrator.restoreRunning', () => {
     const seed = (name: string): void => {
       h.instances.insert({
         name,
+        displayName: null,
         status: 'running',
         baseDomain: 'cvx.lan',
         cloudPort: 13200 + name.length,

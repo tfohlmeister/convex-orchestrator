@@ -8,6 +8,7 @@ import type { Logger } from '../logger.ts';
 function fakeInstance(name: string): Instance {
   return {
     name,
+    displayName: null,
     status: 'running',
     baseDomain: 'test',
     cloudPort: 1,

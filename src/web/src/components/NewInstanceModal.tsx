@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api';
 
@@ -88,15 +88,26 @@ function generateName(): string {
 }
 
 export function NewInstanceModal({ open, onClose }: Props) {
-  const [name, setName] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [slug, setSlug] = useState('');
   const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
+
+  // Pre-generate a slug suggestion when the dialog opens. The user can
+  // accept it, regenerate via the refresh button, or overwrite with
+  // their own (e.g. by copying the display name as a kebab-case slug).
+  useEffect(() => {
+    if (open && !slug) setSlug(generateName());
+  }, [open, slug]);
+
   const mutation = useMutation({
-    mutationFn: (n: string) => api.createInstance(n),
+    mutationFn: ({ slug, displayName }: { slug: string; displayName: string }) =>
+      api.createInstance(slug, displayName.trim() || undefined),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['instances'] });
       onClose();
-      setName('');
+      setDisplayName('');
+      setSlug('');
     },
     onError: (err: Error) => {
       setError(err instanceof ApiError ? err.message : String(err));
@@ -104,15 +115,15 @@ export function NewInstanceModal({ open, onClose }: Props) {
   });
 
   if (!open) return null;
-  const nameValid = NAME_RE.test(name);
-  const canSubmit = nameValid && !mutation.isPending;
+  const slugValid = NAME_RE.test(slug);
+  const canSubmit = slugValid && !mutation.isPending;
 
   return (
     <div className="fixed inset-0 bg-[rgba(28,25,23,0.45)] backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (canSubmit) mutation.mutate(name);
+          if (canSubmit) mutation.mutate({ slug, displayName });
         }}
         className="bg-[var(--color-paper)] border border-[var(--color-rule-strong)] border-t-4 border-t-[var(--color-accent)] rounded-xl p-6 w-[30rem] max-w-full shadow-2xl"
       >
@@ -121,33 +132,48 @@ export function NewInstanceModal({ open, onClose }: Props) {
           New instance
         </h2>
         <label className="block text-[12px] text-[var(--color-muted)] mb-1.5">Name</label>
+        <input
+          autoFocus
+          value={displayName}
+          onChange={(e) => {
+            setDisplayName(e.target.value);
+            setError(null);
+          }}
+          placeholder="My App"
+          maxLength={64}
+          className="input w-full"
+        />
+        <p className="text-[11px] text-[var(--color-soft)] mt-1.5">
+          Human label shown in the UI. Editable later. Optional.
+        </p>
+        <label className="block text-[12px] text-[var(--color-muted)] mb-1.5 mt-4">URL slug</label>
         <div className="flex gap-2">
           <input
-            autoFocus
-            value={name}
+            value={slug}
             onChange={(e) => {
-              setName(e.target.value);
+              setSlug(e.target.value);
               setError(null);
             }}
             placeholder="lucky-otter-123"
-            className="input flex-1"
+            className="input flex-1 font-mono"
           />
           <button
             type="button"
             onClick={() => {
-              setName(generateName());
+              setSlug(generateName());
               setError(null);
             }}
             disabled={mutation.isPending}
-            title="Generate a random name"
-            aria-label="Generate a random name"
+            title="Generate a random slug"
+            aria-label="Generate a random slug"
             className="btn btn-ghost px-3"
           >
             <span aria-hidden>↻</span>
           </button>
         </div>
         <p className="text-[11px] text-[var(--color-soft)] mt-1.5">
-          lowercase-kebab-case, 3-32 chars, starts with a letter
+          Lands in &lt;slug&gt;.&lt;base-domain&gt;. Lowercase-kebab-case, 3-32 chars, starts with a
+          letter. Fixed after create.
         </p>
         {error && <p className="text-[12px] text-[var(--color-danger)] mt-2">{error}</p>}
         {mutation.isPending && (

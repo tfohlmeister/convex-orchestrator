@@ -4,6 +4,7 @@ import type { Instance, InstanceStatus, ResourceSample } from '../supervisor/typ
 
 interface InstanceRow {
   name: string;
+  display_name: string | null;
   status: InstanceStatus;
   base_domain: string;
   cloud_port: number;
@@ -31,15 +32,16 @@ export class InstanceRepo {
     this.db
       .prepare(
         `INSERT INTO instances (
-          name, status, base_domain, cloud_port, site_port,
+          name, display_name, status, base_domain, cloud_port, site_port,
           admin_key_enc, instance_secret_enc,
           postgres_schema, bucket_prefix,
           created_at, updated_at, last_error,
           backup_cron, backup_retention_days, backup_enabled, backup_suspended
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         instance.name,
+        instance.displayName,
         instance.status,
         instance.baseDomain,
         instance.cloudPort,
@@ -56,6 +58,12 @@ export class InstanceRepo {
         instance.backupEnabled === null ? null : instance.backupEnabled ? 1 : 0,
         instance.backupSuspended ? 1 : 0,
       );
+  }
+
+  setDisplayName(name: string, displayName: string | null): void {
+    this.db
+      .prepare('UPDATE instances SET display_name = ?, updated_at = ? WHERE name = ?')
+      .run(displayName, Date.now(), name);
   }
 
   updateStatus(name: string, status: InstanceStatus, lastError: string | null = null): void {
@@ -127,6 +135,7 @@ export class InstanceRepo {
   private rowToInstance(row: InstanceRow): Instance {
     return {
       name: row.name,
+      displayName: row.display_name,
       status: row.status,
       baseDomain: row.base_domain,
       cloudPort: row.cloud_port,

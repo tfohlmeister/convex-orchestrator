@@ -53,7 +53,7 @@ export class Orchestrator {
     return inst;
   }
 
-  async create(name: string, actor: string): Promise<Instance> {
+  async create(name: string, actor: string, displayName: string | null = null): Promise<Instance> {
     if (this.deps.instances.get(name)) {
       throw new OrchestratorError(409, 'ALREADY_EXISTS', `instance ${name} already exists`);
     }
@@ -78,6 +78,7 @@ export class Orchestrator {
     const { cloud, site } = this.deps.ports.allocatePair(name);
     const instance: Instance = {
       name,
+      displayName,
       status: 'creating',
       baseDomain: this.deps.config.BASE_DOMAIN,
       cloudPort: cloud,
@@ -140,6 +141,17 @@ export class Orchestrator {
     // schedule instead of inheriting the predecessor's nextFire timestamp.
     this.deps.backupManager?.dropInstance(name);
     this.deps.audit.record({ at: Date.now(), actor, action: 'delete', instanceName: name });
+  }
+
+  setDisplayName(name: string, displayName: string | null, actor: string): void {
+    this.get(name);
+    this.deps.instances.setDisplayName(name, displayName);
+    this.deps.audit.record({
+      at: Date.now(),
+      actor,
+      action: 'set_display_name',
+      instanceName: name,
+    });
   }
 
   // Pass-through to InstanceRepo so route handlers don't have to know the

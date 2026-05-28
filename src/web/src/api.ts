@@ -1,5 +1,6 @@
 export interface InstanceListItem {
   name: string;
+  displayName: string | null;
   status: 'creating' | 'running' | 'stopped' | 'error';
   baseDomain: string;
   cloudHost: string;
@@ -166,10 +167,18 @@ export const api = {
     request<{ points: { takenAt: number; rssKb: number; fdCount: number }[] }>(
       `/api/instances/${name}/sparkline?hours=${hours}`,
     ).then((r) => r.points),
-  createInstance: (name: string) =>
-    request<{ instance: { name: string; status: string } }>('/api/instances', {
-      method: 'POST',
-      body: JSON.stringify({ name }),
+  createInstance: (name: string, displayName?: string) =>
+    request<{ instance: { name: string; displayName: string | null; status: string } }>(
+      '/api/instances',
+      {
+        method: 'POST',
+        body: JSON.stringify({ name, ...(displayName ? { displayName } : {}) }),
+      },
+    ),
+  setDisplayName: (name: string, displayName: string) =>
+    request<{ ok: boolean; displayName: string | null }>(`/api/instances/${name}/display-name`, {
+      method: 'PATCH',
+      body: JSON.stringify({ displayName }),
     }),
   startInstance: (name: string) =>
     request<{ ok: boolean }>(`/api/instances/${name}/start`, { method: 'POST' }),

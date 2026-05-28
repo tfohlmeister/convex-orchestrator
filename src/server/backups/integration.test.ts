@@ -210,6 +210,7 @@ async function setupHarness(overrides: Partial<Config> = {}): Promise<Harness> {
   const now = Date.now();
   const instance: Instance = {
     name: 'inst-a',
+    displayName: null,
     status: 'running',
     baseDomain: config.BASE_DOMAIN,
     cloudPort: 13210,

@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import { api, dashboardEmbedPath, getToken, type StorageSample } from '../api';
 import { StatusBadge } from '../components/StatusBadge';
+import { EditableTitle } from '../components/EditableTitle';
 import { ConnectionPanel } from '../components/ConnectionPanel';
 import { EndpointsPanel } from '../components/EndpointsPanel';
 import { BackupsSection, BackupSettings } from '../components/BackupsSection';
@@ -137,9 +138,25 @@ export function InstanceDetailPage() {
           <div>
             <div className="eyebrow mb-2">Instance</div>
             <h1 className="font-serif text-[42px] leading-[1.05] text-[var(--color-ink)] tracking-tight flex items-baseline gap-4 flex-wrap">
-              <span className="font-mono text-[34px] font-medium">{instance.name}</span>
+              <EditableTitle instanceName={instance.name} displayName={instance.displayName} />
               <StatusBadge status={instance.status} />
             </h1>
+            <div className="mt-2 text-[12px] font-mono text-[var(--color-soft)] inline-flex items-center gap-2">
+              <span>
+                {instance.name}.{instance.baseDomain}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard.writeText(`${instance.name}.${instance.baseDomain}`);
+                }}
+                title="Copy URL slug"
+                aria-label="Copy URL slug"
+                className="hover:text-[var(--color-ink)] transition-colors"
+              >
+                ⧉
+              </button>
+            </div>
           </div>
           <Link to={dashboardEmbedPath(instance.name)} className="btn btn-primary">
             Open Convex Dashboard

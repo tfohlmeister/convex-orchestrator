@@ -154,12 +154,14 @@ function Row({ instance, onDelete }: { instance: InstanceListItem; onDelete: () 
 
   return (
     <tr className="hover:bg-[var(--color-paper-2)]/60 transition-colors">
-      <td className="px-4 py-3 font-mono text-[13px]">
-        <Link
-          to={`/instances/${instance.name}`}
-          className="text-[var(--color-ink)] hover:text-[var(--color-accent)] transition-colors"
-        >
-          {instance.name}
+      <td className="px-4 py-3">
+        <Link to={`/instances/${instance.name}`} className="block group">
+          <div className="text-[13px] text-[var(--color-ink)] group-hover:text-[var(--color-accent)] transition-colors">
+            {instance.displayName?.trim() || instance.name}
+          </div>
+          {instance.displayName?.trim() && instance.displayName.trim() !== instance.name && (
+            <div className="text-[11px] font-mono text-[var(--color-soft)]">{instance.name}</div>
+          )}
         </Link>
       </td>
       <td className="px-4 py-3">

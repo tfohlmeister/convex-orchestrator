@@ -4,6 +4,28 @@
 
 ### Added
 
+- **Display name, distinct from the URL slug.** Instances now carry an
+  optional `displayName` next to the immutable slug (formerly just
+  `name`). The slug stays put because it backs the Convex
+  `--instance-name`, the multi-tenant Postgres discriminator, MinIO
+  bucket prefixes, and the public subdomain; the display name is the
+  free-form human label shown in the UI and editable any time.
+  - New `display_name` column (migration 005), nullable, NULL falls
+    back to slug in the UI.
+  - `POST /api/instances` accepts optional `displayName`.
+  - New `PATCH /api/instances/:name/display-name` for inline edit.
+  - The create dialog now has two fields (Name + URL slug) with the
+    slug pre-generated on open and a refresh button to regenerate.
+  - The detail page header renders the display name with a click-to-
+    edit pencil; the slug shows below in mono with a copy button.
+  - The overview list sorts by slug (server-side) but renders the
+    display name on top with the slug as a secondary line when set.
+- **Borg-offsite source dirs include orchestrator + postgres volumes**
+  (added in the Ansible playbook on 2026-05-28), MinIO excluded since
+  its backup zips are retention-bounded and re-creatable.
+
+### Added
+
 - **Random instance-name generator in the create dialog.** Click the
   refresh button next to the name field to fill in a
   `<adjective>-<animal>-<3-digit>` name. Pure client-side; combined

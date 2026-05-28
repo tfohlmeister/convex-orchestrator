@@ -9,6 +9,7 @@ import type { Logger } from '../logger.ts';
 function makeInstance(name = 'inst-a'): Instance {
   return {
     name,
+    displayName: null,
     status: 'stopped',
     baseDomain: 'test.local',
     cloudPort: 13210,

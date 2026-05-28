@@ -23,6 +23,7 @@ import {
   InstanceNameSchema,
   LogsQuerySchema,
   RestoreSchema,
+  SetDisplayNameSchema,
 } from './schemas.ts';
 
 export interface SampleWithCpu {
@@ -132,6 +133,7 @@ export function buildRoutes(deps: RouteDeps): Hono {
       const hasStuckBackup = recent.some((b) => b.status === 'stuck');
       return {
         name: i.name,
+        displayName: i.displayName,
         status: i.status,
         baseDomain: i.baseDomain,
         cloudHost: `${i.name}.${i.baseDomain}`,
@@ -200,6 +202,7 @@ export function buildRoutes(deps: RouteDeps): Hono {
       return c.json({
         instance: {
           name: inst.name,
+          displayName: inst.displayName,
           status: inst.status,
           baseDomain: inst.baseDomain,
           cloudHost: `${inst.name}.${inst.baseDomain}`,
@@ -234,8 +237,26 @@ export function buildRoutes(deps: RouteDeps): Hono {
   app.post('/api/instances', requireBearer, async (c) => {
     try {
       const body = CreateInstanceSchema.parse(await c.req.json());
-      const inst = await deps.orchestrator.create(body.name, actorOf(c));
-      return c.json({ instance: { name: inst.name, status: inst.status } }, 201);
+      // Empty string in the form means "no separate label set"; persist
+      // null so the list view falls back to the slug.
+      const displayName = body.displayName?.trim() ? body.displayName.trim() : null;
+      const inst = await deps.orchestrator.create(body.name, actorOf(c), displayName);
+      return c.json(
+        { instance: { name: inst.name, displayName: inst.displayName, status: inst.status } },
+        201,
+      );
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.patch('/api/instances/:name/display-name', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      const body = SetDisplayNameSchema.parse(await c.req.json());
+      const displayName = body.displayName.trim() ? body.displayName.trim() : null;
+      deps.orchestrator.setDisplayName(name, displayName, actorOf(c));
+      return c.json({ ok: true, displayName });
     } catch (err: unknown) {
       return errorResponse(c, err);
     }

@@ -12,8 +12,18 @@ export const InstanceNameSchema = z
   })
   .refine((s) => !RESERVED.has(s), { message: 'reserved name' });
 
+// Free-form human label. Empty string is allowed (the route handler
+// normalises empty to null, which means "fall back to the slug in the
+// UI"). 64-char cap to keep table layouts predictable.
+export const DisplayNameSchema = z.string().max(64);
+
 export const CreateInstanceSchema = z.object({
   name: InstanceNameSchema,
+  displayName: DisplayNameSchema.optional(),
+});
+
+export const SetDisplayNameSchema = z.object({
+  displayName: DisplayNameSchema,
 });
 
 export const DeleteConfirmSchema = z.object({
@@ -41,6 +51,7 @@ export const RestoreSchema = z.object({
 });
 
 export type CreateInstanceInput = z.infer<typeof CreateInstanceSchema>;
+export type SetDisplayNameInput = z.infer<typeof SetDisplayNameSchema>;
 export type DeleteConfirmInput = z.infer<typeof DeleteConfirmSchema>;
 export type LogsQuery = z.infer<typeof LogsQuerySchema>;
 export type BackupConfigInput = z.infer<typeof BackupConfigSchema>;

@@ -1,7 +1,14 @@
 export type InstanceStatus = 'creating' | 'running' | 'stopped' | 'error';
 
 export interface Instance {
+  // Slug. Primary key, immutable after create. Appears in URLs as
+  // <name>.<baseDomain>, in MinIO bucket prefixes, and as the Convex
+  // backend's --instance-name arg (which keys multi-tenant Postgres
+  // rows). Cannot be changed without a full export+restore migration.
   name: string;
+  // Human label, free-form, NULL when not set. UI falls back to `name`.
+  // Editable any time without touching the slug.
+  displayName: string | null;
   status: InstanceStatus;
   baseDomain: string;
   cloudPort: number;
