@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+
+- **Random instance-name generator in the create dialog.** Click the
+  refresh button next to the name field to fill in a
+  `<adjective>-<animal>-<3-digit>` name. Pure client-side; combined
+  space is ~810k names.
+
+### Fixed
+
+- **New-instance dialog now submits on Enter.** The form was a `<div>`
+  before, so the Enter key did nothing. Wrapped it in a real `<form>`;
+  the Create button is now `type="submit"` and the Cancel / Generate
+  buttons are explicit `type="button"`.
+- **Dashboard iframe handshake works under tunneled access.** The iframe
+  source was hard-coded to `dashboard.<baseDomain>`, which under an SSH
+  local forward resolves to the host's public IP (port 18000 not
+  exposed publicly) and the iframe never loaded. Now falls back to
+  `dashboard.<currentHostname>` when the browser's hostname is not part
+  of baseDomain. `dashboard.localhost` resolves to 127.0.0.1 in modern
+  browsers (RFC 6761) and reuses the same tunnel; the server's host
+  routing already accepts any `dashboard.*` host.
+- **Drop the leftover internal-project placeholder** in the create
+  dialog (`masterev-dev`). Now `lucky-otter-123`.
+
 ## 0.1.0 (2026-05-28), initial version
 
 First public version of `convex-orchestrator`. Supervises N self-hosted

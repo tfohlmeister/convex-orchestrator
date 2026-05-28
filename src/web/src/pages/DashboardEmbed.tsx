@@ -21,14 +21,28 @@ export function DashboardEmbedPage() {
   // Lift the dashboard origin out of the render path so the message
   // handler closure (created in useEffect) can pin postMessage's target
   // origin to it instead of '*'. Posting to '*' would deliver the admin
-  // key to whatever origin the iframe happens to be on at reply time —
+  // key to whatever origin the iframe happens to be on at reply time,
   // a real concern if the iframe ever redirects (open-redirect / supply
-  // chain compromise of the bundled dashboard). Found by the code-review
-  // fleet (security #13).
+  // chain compromise of the bundled dashboard).
+  //
+  // dashboard.<baseDomain> is the canonical case (production access where
+  // the orchestrator sits behind public DNS for baseDomain). In tunneled
+  // access (e.g. SSH local forward against a co-hosted deployment) the
+  // browser's hostname is localhost while baseDomain is the production
+  // host; loading dashboard.<baseDomain> would resolve to the host's
+  // public IP, which doesn't expose the tunneled port and the iframe
+  // hangs at the credentials handshake. Fall back to dashboard.<hostname>
+  // in that case, which the server's host-routing also accepts (it gates
+  // on host.startsWith('dashboard.'), see src/server/index.ts).
   const port = window.location.port ? `:${window.location.port}` : '';
-  const dashboardOrigin = query.data
-    ? `${window.location.protocol}//dashboard.${query.data.instance.baseDomain}${port}`
-    : null;
+  const proto = window.location.protocol;
+  const hostname = window.location.hostname;
+  const baseDomain = query.data?.instance.baseDomain ?? '';
+  const dashboardHost =
+    baseDomain && hostname.endsWith(baseDomain)
+      ? `dashboard.${baseDomain}`
+      : `dashboard.${hostname}`;
+  const dashboardOrigin = query.data ? `${proto}//${dashboardHost}${port}` : null;
 
   useEffect(() => {
     if (!query.data || !dashboardOrigin) return;
