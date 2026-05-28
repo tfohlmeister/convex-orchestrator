@@ -30,6 +30,14 @@ services:
   orchestrator:
     environment:
       TRAEFIK_SELF_ROUTES_ENABLED: 'false'
+    # The base file labels expose `orchestrator` and `dashboard` routers via
+    # the docker provider. In cohosted mode those names can collide with
+    # an existing stack on the same host (a user's own `dashboard` router,
+    # for example, would silently lose its config when this stack came up).
+    # The UI + bundled dashboard are reached via the SSH local forward, so
+    # the docker provider has no business with this container in this mode.
+    labels:
+      traefik.enable: 'false'
     ports:
       - '127.0.0.1:${ORCHESTRATOR_UI_BIND_PORT:-18000}:8080'
     networks:
