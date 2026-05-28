@@ -160,8 +160,15 @@ export async function bootstrap(): Promise<void> {
   // per-instance dynamic.yml the orchestrator writes elsewhere. This lets us
   // skip the Traefik docker provider entirely, which avoids the
   // Docker-API-version mismatch with daemon 29.x.
-  const selfRoutesPath = config.TRAEFIK_DYNAMIC_PATH.replace(/[^/]*$/, 'self.yml');
-  await writeSelfRoutes(selfRoutesPath, config);
+  //
+  // Co-hosted deployments (sharing a Traefik with other services) set
+  // TRAEFIK_SELF_ROUTES_ENABLED=false to suppress self.yml entirely; in that
+  // mode the operator reaches the UI via SSH local forward or a private
+  // network. Per-instance routers are still emitted in both modes.
+  if (config.TRAEFIK_SELF_ROUTES_ENABLED) {
+    const selfRoutesPath = config.TRAEFIK_DYNAMIC_PATH.replace(/[^/]*$/, 'self.yml');
+    await writeSelfRoutes(selfRoutesPath, config);
+  }
 
   let ready = false;
   supervisor.startBackgroundJobs();

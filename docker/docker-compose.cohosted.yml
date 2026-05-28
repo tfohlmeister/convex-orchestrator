@@ -1,0 +1,56 @@
+# Co-hosted overlay. Use this when the host already runs a Traefik with
+# the file provider enabled and you want the orchestrator's per-instance
+# routes to be picked up by that existing Traefik instead of bringing up
+# a second one.
+#
+# Run with:
+#   docker compose -f docker-compose.yml -f docker-compose.cohosted.yml up -d
+#
+# The overlay:
+#   - drops the bundled `traefik` service (the host's existing one is used)
+#   - attaches the orchestrator container to an external docker network
+#     that the existing Traefik is already on (PROXY_NETWORK env)
+#   - bind-mounts the host's existing Traefik dynamic-config dir into the
+#     orchestrator (TRAEFIK_DYNAMIC_DIR_HOST env), so the orchestrator
+#     writes per-instance routers directly into the watched dir
+#   - suppresses self.yml so the orchestrator UI + bundled dashboard are
+#     NOT routed by the shared Traefik; reach them via SSH local forward
+#     against ORCHESTRATOR_UI_BIND_PORT instead
+#   - binds the orchestrator's HTTP port to 127.0.0.1 on the host only
+#
+# Required env (set in .env, in addition to the base file's vars):
+#   PROXY_NETWORK              external docker network the existing
+#                              Traefik attaches services to
+#   TRAEFIK_DYNAMIC_DIR_HOST   host path of the existing Traefik's
+#                              `--providers.file.directory`
+#   ORCHESTRATOR_UI_BIND_PORT  loopback port for the SSH local forward;
+#                              default 18000
+
+services:
+  orchestrator:
+    environment:
+      TRAEFIK_SELF_ROUTES_ENABLED: 'false'
+    ports:
+      - '127.0.0.1:${ORCHESTRATOR_UI_BIND_PORT:-18000}:8080'
+    networks:
+      - default
+      - shared-proxy
+    volumes:
+      # !reset clears the named-volume binding from the base file so we
+      # can replace it with the host's existing Traefik dynamic dir.
+      - !reset null
+      - orchestrator-data:/var/lib/orchestrator
+      - convex-logs:/var/log/convex
+      - ${TRAEFIK_DYNAMIC_DIR_HOST}:/etc/traefik/dynamic
+
+  # The base file's `traefik` service stays defined here but is expected
+  # NOT to be started in this mode. The operator selects services
+  # explicitly on the command line, e.g.:
+  #   docker compose -f docker-compose.yml -f docker-compose.cohosted.yml \
+  #     up -d orchestrator postgres minio
+  # See docs/deploy-cohosted.md for the full walkthrough.
+
+networks:
+  shared-proxy:
+    name: ${PROXY_NETWORK}
+    external: true

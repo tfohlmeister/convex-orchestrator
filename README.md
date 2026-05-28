@@ -157,6 +157,9 @@ requires typing the instance name as confirmation, same UX as Restore.
   postMessage instead of the dashboard switcher)
 - **[Backups & Restore](./docs/backups.md)** — operator guide: retention tuning, force-restart-
   backend, off-site sync, recovery playbooks
+- **[Co-hosted deployment](./docs/deploy-cohosted.md)** — running on a host that already has a
+  Traefik with the file provider; UI reached via SSH local forward, per-instance Convex URLs
+  stay public
 
 The Dockerfile pulls the Convex backend binary from the official
 `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key`

@@ -26,6 +26,16 @@ const envSchema = z.object({
   CONVEX_BINARY: z.string().default('/convex/convex-local-backend'),
   GENERATE_KEY_BINARY: z.string().default('/convex/generate_key'),
   TRAEFIK_DYNAMIC_PATH: z.string().default('/etc/traefik/dynamic/orchestrator.yml'),
+  // When false the orchestrator does NOT write self.yml (the routers that
+  // expose orchestrator.<base> and dashboard.<base>). Use this for co-hosted
+  // deployments where the operator wants the UI reachable only via a
+  // private channel (SSH local forward, VPN) instead of through the shared
+  // Traefik. Per-instance routers are still written either way; only the
+  // orchestrator/dashboard hosts are gated.
+  TRAEFIK_SELF_ROUTES_ENABLED: z
+    .string()
+    .transform((v) => v.toLowerCase() !== 'false' && v !== '0')
+    .default('true'),
   // Cert resolver name. Empty/unset → write `tls: {}` so Traefik serves the
   // default certificate from its cert store (useful for self-signed setups).
   TRAEFIK_CERT_RESOLVER: z.string().default(''),

@@ -172,6 +172,7 @@ async function setupHarness(overrides: Partial<Config> = {}): Promise<Harness> {
     CONVEX_BINARY: '/dev/null',
     GENERATE_KEY_BINARY: '/dev/null',
     TRAEFIK_DYNAMIC_PATH: join(tmp, 'dynamic.yml'),
+    TRAEFIK_SELF_ROUTES_ENABLED: true,
     TRAEFIK_CERT_RESOLVER: '',
     TRAEFIK_ENTRYPOINT: 'web',
     TRAEFIK_SERVICE_LOOPBACK: 'localhost',

@@ -78,6 +78,14 @@ instance.
   path is end-to-end against the public `<instance>.<base>` URL per
   instance, not the aggregator, since end-to-end exercises the full
   DNS + TLS + Traefik + backend chain.
+- **Co-hosted deployment mode.** A third compose overlay
+  `docker-compose.cohosted.yml` runs the orchestrator alongside an
+  existing host-level Traefik (file provider). Per-instance routers
+  go through the shared Traefik; the orchestrator UI binds to
+  loopback only and is reached via SSH local forward. New env
+  `TRAEFIK_SELF_ROUTES_ENABLED` (default `true`) gates whether the
+  orchestrator writes the `self.yml` exposing orchestrator/dashboard
+  hosts. See `docs/deploy-cohosted.md`.
 
 ### Docs
 
