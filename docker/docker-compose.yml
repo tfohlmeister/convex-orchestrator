@@ -2,10 +2,12 @@ name: convex-orchestrator
 
 services:
   orchestrator:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: convex-orchestrator:local
+    # Default path pulls the published image from GHCR. Pin a specific
+    # release by setting ORCHESTRATOR_VERSION=0.1.0 in .env, or leave it
+    # unset to track :latest. Contributors building from source layer
+    # docker-compose.dev.yml on top (it adds `build:` against the local
+    # Dockerfile and tags the result with the same image name).
+    image: ghcr.io/tfohlmeister/convex-orchestrator:${ORCHESTRATOR_VERSION:-latest}
     container_name: orchestrator
     restart: unless-stopped
     environment:

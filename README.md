@@ -49,11 +49,15 @@ walkthrough plus the backup, restore, and instance-lifecycle diagrams live in
 
 ## Try it
 
+The base `docker-compose.yml` pulls the multi-arch (`linux/amd64`,
+`linux/arm64`) image from GHCR. No local build, no toolchain on the host.
+
 ```bash
 git clone https://github.com/tfohlmeister/convex-orchestrator.git
 cd convex-orchestrator/docker
 cp .env.example .env
 $EDITOR .env   # set BASE_DOMAIN, ORCHESTRATOR_MASTER_KEY, ...
+docker compose pull
 docker compose up -d
 ```
 
@@ -61,10 +65,15 @@ Open `https://orchestrator.<BASE_DOMAIN>` and create your first instance. Click 
 any row to land in the official Convex dashboard, embedded and auto-authenticated for that
 instance.
 
+Pin a specific release for repeatable deploys by setting `ORCHESTRATOR_VERSION=0.1.0` in `.env`;
+unset means `latest`.
+
 ### Dev / homelab variant (HTTP, no Let's Encrypt)
 
 If you don't have a public domain with DNS-01 wildcard credentials, or your host already runs
-something on 80/443, layer the HTTP-only dev override on top of the default file:
+something on 80/443, layer the HTTP-only dev override on top of the default file. The override
+also switches from the published GHCR image to a local build from the working tree, so this is
+the contributor path too:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
