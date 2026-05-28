@@ -7,7 +7,7 @@
 - **Orchestrator container now runs as non-root** (`USER bun`, uid 1000),
   matching the host's `tf` user on the co-hosted deploy so the shared
   Traefik dynamic-config dir bind-mount stays writable. The `convex
-  export` / `convex import` subprocess and the supervised
+export` / `convex import` subprocess and the supervised
   `convex-local-backend` children inherit non-root. Removes the
   "RCE-to-root-in-container" path for any bug in the upload, restore,
   or spawn code.
