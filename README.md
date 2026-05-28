@@ -49,8 +49,8 @@ walkthrough plus the backup, restore, and instance-lifecycle diagrams live in
 
 ## Try it
 
-The base `docker-compose.yml` pulls the multi-arch (`linux/amd64`,
-`linux/arm64`) image from GHCR. No local build, no toolchain on the host.
+The base `docker-compose.yml` pulls the `linux/amd64` image from GHCR.
+No local build, no toolchain on the host.
 
 ```bash
 git clone https://github.com/tfohlmeister/convex-orchestrator.git

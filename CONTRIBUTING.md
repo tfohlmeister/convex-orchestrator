@@ -110,7 +110,7 @@ more than tag conformance.
 ## Pull requests
 
 CI (`.github/workflows/ci.yml`) runs `bun install`, `bun run check`, a
-multi-arch docker build, and an integration smoke test on every PR. Keep
+docker build, and an integration smoke test on every PR. Keep
 the dist artifacts out of the diff; CI rebuilds.
 
 The PR template prompts for summary, test plan, docs check, and breaking-
@@ -120,7 +120,7 @@ change note. Filling it out keeps the review loop short.
 
 Versions are tag-driven. Pushing `v<x.y.z>` to `main` triggers
 [`.github/workflows/release.yml`](./.github/workflows/release.yml), which
-builds the multi-arch (`linux/amd64,linux/arm64`) image and pushes it to
+builds the `linux/amd64` image and pushes it to
 `ghcr.io/tfohlmeister/convex-orchestrator:<x.y.z>` plus the `latest` tag
 on stable releases.
 
