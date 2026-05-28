@@ -86,10 +86,30 @@ export function buildRoutes(deps: RouteDeps): Hono {
   // available.
   const actorOf = authEnabled ? () => 'admin' : actorOfFromHeader;
 
-  app.get('/healthz', (c) => c.json({ ok: true }));
-  app.get('/readyz', (c) =>
+  // Liveness probe — the orchestrator process is up and serving HTTP.
+  // Used by docker healthcheck and by anything that wants the cheapest
+  // possible "is this thing alive?" answer. Always 200 if we can respond.
+  app.get('/health', (c) => c.json({ ok: true }));
+
+  // Readiness probe — the boot sequence (migrations, traefik write,
+  // restoreRunning) finished. 503 until then so a reverse proxy or
+  // orchestrator deployment system can wait before routing traffic.
+  app.get('/ready', (c) =>
     deps.ready() ? c.json({ ready: true }) : c.json({ ready: false }, 503),
   );
+
+  // Fleet health aggregator — summarises every supervised backend. 200
+  // when every instance that should be running is reachable on its
+  // internal cloud port; 503 if any `running` instance fails the ping
+  // or any instance sits in `error`. Operator-stopped instances
+  // (`stopped`) and in-flight ones (`creating`) are not faults.
+  // Used by Gatus / external monitoring; no auth because no sensitive
+  // data is returned (instance names are already public DNS).
+  app.get('/health/instances', async (c) => {
+    const detail = await collectInstanceHealth(deps);
+    const status = detail.ok ? 200 : 503;
+    return c.json(detail, status);
+  });
   // Unauthenticated probe so the UI can decide whether to prompt for a
   // token. Returns the active mode only, never the token itself.
   app.get('/api/auth/mode', (c) => c.json({ mode: authEnabled ? 'bearer' : 'none' }));
@@ -501,6 +521,76 @@ export function buildRoutes(deps: RouteDeps): Hono {
 
 function actorOfFromHeader(c: Context): string {
   return c.req.header('x-forwarded-user') ?? 'admin';
+}
+
+export interface InstanceHealth {
+  name: string;
+  status: 'creating' | 'running' | 'stopped' | 'error';
+  backendReachable: boolean | null;
+}
+
+export interface FleetHealth {
+  ok: boolean;
+  summary: {
+    total: number;
+    running: number;
+    unhealthy: number;
+    stopped: number;
+    error: number;
+    creating: number;
+  };
+  instances: InstanceHealth[];
+}
+
+// Internal cloud-port reachability probe. 0.0.0.0 binding (docker
+// network) is reached on 127.0.0.1 from inside the orchestrator
+// container. 2s timeout — Convex /version is sub-ms when healthy.
+async function probeBackend(host: string, port: number): Promise<boolean> {
+  const target = host === '0.0.0.0' ? '127.0.0.1' : host;
+  try {
+    const res = await fetch(`http://${target}:${port}/version`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function collectInstanceHealth(deps: RouteDeps): Promise<FleetHealth> {
+  const bindAddress = deps.config.CONVEX_BIND_ADDRESS;
+  const list = deps.orchestrator.list();
+
+  const instances: InstanceHealth[] = await Promise.all(
+    list.map(async (i) => {
+      const status = i.status as InstanceHealth['status'];
+      const backendReachable =
+        status === 'running' ? await probeBackend(bindAddress, i.cloudPort) : null;
+      return { name: i.name, status, backendReachable };
+    }),
+  );
+
+  const summary = {
+    total: instances.length,
+    running: 0,
+    unhealthy: 0,
+    stopped: 0,
+    error: 0,
+    creating: 0,
+  };
+  for (const i of instances) {
+    if (i.status === 'running') summary.running += 1;
+    else if (i.status === 'stopped') summary.stopped += 1;
+    else if (i.status === 'error') summary.error += 1;
+    else if (i.status === 'creating') summary.creating += 1;
+    if (i.status === 'running' && i.backendReachable === false) summary.unhealthy += 1;
+  }
+
+  // Healthy: no running-but-unreachable instances AND no `error` rows.
+  // Operator-stopped and in-flight (`creating`) instances do not flip the
+  // overall status to false.
+  const ok = summary.unhealthy === 0 && summary.error === 0;
+  return { ok, summary, instances };
 }
 
 function bearerAuth(token: string) {

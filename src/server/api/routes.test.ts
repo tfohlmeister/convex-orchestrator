@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test';
-import { buildRoutes, deriveCpuCores, type RouteDeps } from './routes.ts';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { buildRoutes, collectInstanceHealth, deriveCpuCores, type RouteDeps } from './routes.ts';
 import type { ResourceSample } from '../supervisor/types.ts';
 import type { Config } from '../config.ts';
 
@@ -107,6 +107,157 @@ describe('auth gating', () => {
       headers: { authorization: 'Bearer a-very-secret-token-of-sufficient-length' },
     });
     expect(allowed.status).toBe(200);
+  });
+});
+
+describe('health endpoints', () => {
+  type FakeInstance = {
+    name: string;
+    status: 'creating' | 'running' | 'stopped' | 'error';
+    cloudPort: number;
+  };
+
+  function buildHealthDeps(instances: FakeInstance[], ready = true): RouteDeps {
+    const config = {
+      ORCHESTRATOR_ADMIN_TOKEN: '',
+      EXTERNAL_SCHEME: 'http',
+      EXTERNAL_PORT_SUFFIX: '',
+      BASE_DOMAIN: 'cvx.lan',
+      CONVEX_BIND_ADDRESS: '127.0.0.1',
+    } as unknown as Config;
+    return {
+      orchestrator: { list: () => instances } as unknown as RouteDeps['orchestrator'],
+      config,
+      samples: {} as unknown as RouteDeps['samples'],
+      storage: {} as unknown as RouteDeps['storage'],
+      audit: {} as unknown as RouteDeps['audit'],
+      backups: {} as unknown as RouteDeps['backups'],
+      backupManager: {} as unknown as RouteDeps['backupManager'],
+      restoreManager: {} as unknown as RouteDeps['restoreManager'],
+      minio: {} as unknown as RouteDeps['minio'],
+      ready: () => ready,
+    };
+  }
+
+  // Mock fetch to control reachability without spinning up real backends.
+  const realFetch = globalThis.fetch;
+  let reachableHosts = new Set<number>();
+
+  beforeEach(() => {
+    reachableHosts = new Set();
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
+      const match = u.match(/:(\d+)\//);
+      const port = match ? Number(match[1]) : -1;
+      if (reachableHosts.has(port)) return new Response('{"version":"x"}', { status: 200 });
+      throw new Error('refused');
+    }) as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  test('GET /health always returns 200', async () => {
+    const app = buildRoutes(buildHealthDeps([]));
+    const res = await app.request('/health');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  test('GET /ready returns 200 when ready, 503 otherwise', async () => {
+    const app1 = buildRoutes(buildHealthDeps([], true));
+    expect((await app1.request('/ready')).status).toBe(200);
+
+    const app2 = buildRoutes(buildHealthDeps([], false));
+    expect((await app2.request('/ready')).status).toBe(503);
+  });
+
+  test('empty fleet is healthy', async () => {
+    const out = await collectInstanceHealth(buildHealthDeps([]));
+    expect(out.ok).toBe(true);
+    expect(out.summary.total).toBe(0);
+    expect(out.instances).toEqual([]);
+  });
+
+  test('running + reachable counts as healthy', async () => {
+    reachableHosts.add(13210);
+    const out = await collectInstanceHealth(
+      buildHealthDeps([{ name: 'a', status: 'running', cloudPort: 13210 }]),
+    );
+    expect(out.ok).toBe(true);
+    expect(out.summary.running).toBe(1);
+    expect(out.summary.unhealthy).toBe(0);
+    expect(out.instances[0]!.backendReachable).toBe(true);
+  });
+
+  test('running + unreachable flips ok=false and bumps unhealthy', async () => {
+    const out = await collectInstanceHealth(
+      buildHealthDeps([{ name: 'a', status: 'running', cloudPort: 13210 }]),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.summary.unhealthy).toBe(1);
+    expect(out.instances[0]!.backendReachable).toBe(false);
+  });
+
+  test('error status flips ok=false even without probe', async () => {
+    const out = await collectInstanceHealth(
+      buildHealthDeps([{ name: 'a', status: 'error', cloudPort: 13210 }]),
+    );
+    expect(out.ok).toBe(false);
+    expect(out.summary.error).toBe(1);
+    expect(out.instances[0]!.backendReachable).toBeNull();
+  });
+
+  test('stopped and creating do not flip ok', async () => {
+    const out = await collectInstanceHealth(
+      buildHealthDeps([
+        { name: 'a', status: 'stopped', cloudPort: 13210 },
+        { name: 'b', status: 'creating', cloudPort: 13212 },
+      ]),
+    );
+    expect(out.ok).toBe(true);
+    expect(out.summary.stopped).toBe(1);
+    expect(out.summary.creating).toBe(1);
+    expect(out.instances[0]!.backendReachable).toBeNull();
+    expect(out.instances[1]!.backendReachable).toBeNull();
+  });
+
+  test('mixed fleet: running+OK, stopped, creating yields ok=true', async () => {
+    reachableHosts.add(13210);
+    const out = await collectInstanceHealth(
+      buildHealthDeps([
+        { name: 'a', status: 'running', cloudPort: 13210 },
+        { name: 'b', status: 'stopped', cloudPort: 13212 },
+        { name: 'c', status: 'creating', cloudPort: 13214 },
+      ]),
+    );
+    expect(out.ok).toBe(true);
+    expect(out.summary).toEqual({
+      total: 3,
+      running: 1,
+      unhealthy: 0,
+      stopped: 1,
+      error: 0,
+      creating: 1,
+    });
+  });
+
+  test('GET /health/instances returns 503 when any running instance is unreachable', async () => {
+    const app = buildRoutes(buildHealthDeps([{ name: 'a', status: 'running', cloudPort: 13210 }]));
+    const res = await app.request('/health/instances');
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(false);
+  });
+
+  test('GET /health/instances returns 200 when all running instances reachable', async () => {
+    reachableHosts.add(13210);
+    const app = buildRoutes(buildHealthDeps([{ name: 'a', status: 'running', cloudPort: 13210 }]));
+    const res = await app.request('/health/instances');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
   });
 });
 

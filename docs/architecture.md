@@ -119,6 +119,39 @@ between the per-instance writer and the self-routes writer (`src/server/traefik/
 (`src/server/urls.ts`) so URLs are consistent across the list endpoint, detail endpoint, the
 deployment switcher payload, and the dashboard postMessage handshake.
 
+## Health endpoints
+
+Three unauthenticated probes, each with a narrow purpose:
+
+| Endpoint                | Returns                                                                                                                                                                                                                                   | Used by                                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET /health`           | `200 { ok: true }` whenever the Hono process can answer                                                                                                                                                                                   | Docker `HEALTHCHECK`, orchestrator-liveness checks (e.g. Gatus pointed at the orchestrator host) |
+| `GET /ready`            | `200 { ready: true }` after boot completes (migrations, traefik write, `restoreRunning`), `503 { ready: false }` before                                                                                                                   | Reverse-proxy "don't route traffic yet" gates                                                    |
+| `GET /health/instances` | Fleet aggregator: per-instance status + internal `/version` reachability probe, plus rollup counts. `200` when every `running` instance is reachable and nothing is in `error`; `503` otherwise. `stopped` and `creating` are not faults. | Local inspection, in-UI fleet-status badges. Not the recommended path for external monitoring.   |
+
+The recommended external-monitoring pattern is **end-to-end per
+instance**: have Gatus (or whatever) hit
+`https://<instance>.<base-domain>/version` directly. That exercises the
+full chain (public DNS → TLS termination → Traefik router → backend
+process), so a green check actually means a real Convex client can
+connect. The orchestrator-side aggregator only proves "the orchestrator
+can reach the backend on its private port", which is a strictly weaker
+signal. Pay the manual cost of adding a Gatus row per instance; you
+add instances rarely.
+
+Why no auth on any of these: in the recommended deployment the
+orchestrator binds the HTTP port to localhost (plus an internal
+interface for monitoring), not to the public internet, so network-layer
+auth (SSH-forward, VPN identity) already gates access. The payload
+deliberately omits backend version strings, so even if the endpoint
+ever leaks public the only disclosure is the instance names, which
+are already in public DNS under `<instance>.<base-domain>`.
+
+The internal reachability probe is a `fetch` against
+`http://<bindAddress>:<cloudPort>/version` with a 2 s timeout; `0.0.0.0`
+bindings are reached on `127.0.0.1` from inside the orchestrator
+container. See `collectInstanceHealth` in `src/server/api/routes.ts`.
+
 ## Design decisions worth knowing
 
 A few load-bearing findings from the original Phase 0 spike, kept here because the code shape only

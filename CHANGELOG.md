@@ -70,6 +70,14 @@ instance.
   overview and time-series charts on the detail page. Sparkline
   endpoint is dedicated (`/api/instances/:name/samples?metric=…`) to
   avoid an N+1 on the list view.
+- **Health endpoints (unauthenticated).** `GET /health` is a simple
+  liveness probe used by the Docker `HEALTHCHECK`; `GET /ready` returns
+  503 until the boot sequence finishes; `GET /health/instances` is a
+  fleet aggregator returning 200 / 503 with per-instance status and an
+  internal reachability probe. The recommended external-monitoring
+  path is end-to-end against the public `<instance>.<base>` URL per
+  instance, not the aggregator, since end-to-end exercises the full
+  DNS + TLS + Traefik + backend chain.
 
 ### Docs
 

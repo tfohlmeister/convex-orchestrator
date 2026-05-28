@@ -247,8 +247,8 @@ export async function bootstrap(): Promise<void> {
   app.notFound(async (c) => {
     if (
       c.req.path.startsWith('/api') ||
-      c.req.path.startsWith('/healthz') ||
-      c.req.path.startsWith('/readyz')
+      c.req.path.startsWith('/health') ||
+      c.req.path.startsWith('/ready')
     ) {
       return c.json({ error: 'not found', code: 'NOT_FOUND' }, 404);
     }
