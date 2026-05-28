@@ -116,11 +116,11 @@ jobs:
             -e LOG_LEVEL=info \
             -p 8080:8080 \
             convex-orchestrator:test
-          # Poll /healthz with a deadline; dump logs on every failure
+          # Poll /health with a deadline; dump logs on every failure
           # path so we always get diagnostics if something's wrong.
           ok=
           for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/healthz; then
+            if curl -fsS http://localhost:8080/health; then
               ok=1
               break
             fi

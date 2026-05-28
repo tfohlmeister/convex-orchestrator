@@ -18,7 +18,7 @@ One Hono process inside one container does five things:
   with restart backoff, resource sampling, and graceful shutdown.
 - **Writes the Traefik file-provider config** (`dynamic.yml`) atomically (temp + rename) so
   `providers.file.watch=true` never sees a partial file. Per-instance cloud and site routers are
-  added or removed in place — no Traefik restart.
+  added or removed in place, no Traefik restart.
 - **Talks to Postgres and MinIO** for shared storage. Each backend's `convex-backend` is launched
   with `-d postgres-v5-multitenant` and S3 env vars pointing at MinIO with a per-instance
   bucket prefix.
@@ -36,13 +36,13 @@ the lifecycle and emits `onStatusChange` callbacks that write the column.
 
 Restart policy (`src/server/supervisor/watcher.ts`):
 
-- `RESTART_DELAYS_MS = [1000, 5000, 30_000, 60_000]` — backoff between attempts inside a window.
-- `MAX_RESTARTS = 5` and `WINDOW_MS = 10 * 60_000` — at most five restarts in any ten-minute
+- `RESTART_DELAYS_MS = [1000, 5000, 30_000, 60_000]`, backoff between attempts inside a window.
+- `MAX_RESTARTS = 5` and `WINDOW_MS = 10 * 60_000`, at most five restarts in any ten-minute
   window before giving up.
 - After give-up, the row flips to `error` with the last exit code/message in `last_error`.
 
 Operator-initiated `stop` during the respawn backoff cancels the pending `setTimeout` so the
-backend stays down. Without that cancel, the operator's stop would race the scheduled spawn — the
+backend stays down. Without that cancel, the operator's stop would race the scheduled spawn, the
 backend would come back up after stop returned successfully, while Traefik already removed the
 route. The supervisor keeps a `pendingRespawn: Map<name, NodeJS.Timeout>` for this reason; see
 `Supervisor` in `src/server/supervisor/supervisor.ts`.
@@ -56,21 +56,21 @@ On orchestrator restart, instances marked `running` are re-spawned by `restoreRu
 
 The backup manager (`src/server/backups/manager.ts`) runs four background ticks:
 
-- **Scheduler** — every minute. Walks instances with `backup_enabled=1`, parses each row's
+- **Scheduler**, every minute. Walks instances with `backup_enabled=1`, parses each row's
   per-instance cron (falls back to `BACKUP_DEFAULT_CRON`), enqueues a job when the cron's next
   fire is in the past.
-- **Stuck detector** — every minute. Any backup row in `running` for longer than
+- **Stuck detector**, every minute. Any backup row in `running` for longer than
   `BACKUP_EXPORT_TIMEOUT_MINUTES` (default 30) is flipped to `stuck` and an audit row is
   recorded. The UI surfaces a force-restart-backend button on the instance detail page.
-- **Retention sweeper** — daily at `BACKUP_RETENTION_HOUR` (default 04:00 server-local). Deletes
+- **Retention sweeper**, daily at `BACKUP_RETENTION_HOUR` (default 04:00 server-local). Deletes
   `source=auto` rows older than the per-instance `backup_retention_days` (falls back to
   `BACKUP_RETENTION_DAYS`). `manual`, `manual-upload`, and `pre-restore` rows are kept until the
   operator deletes them.
-- **Export-blob orphan cleanup** — hourly. Walks the local `BACKUP_WORK_DIR` and removes
+- **Export-blob orphan cleanup**, hourly. Walks the local `BACKUP_WORK_DIR` and removes
   `restore_*.zip` and `*.blob` files older than `EXPORT_BLOB_CLEANUP_MIN_AGE_MS`.
 
 The export-and-upload path itself is sequential per instance and bounded by
-`BACKUP_MAX_CONCURRENT` (default 2) across the fleet — Convex's export is backend-CPU-heavy and
+`BACKUP_MAX_CONCURRENT` (default 2) across the fleet, Convex's export is backend-CPU-heavy and
 parallelism past 2 starves request traffic. The upload uses `@aws-sdk/lib-storage`'s `Upload`
 helper so single-PUT 5 GiB cap doesn't apply.
 
@@ -78,7 +78,7 @@ helper so single-PUT 5 GiB cap doesn't apply.
 
 ![Restore flow](./diagrams/restore-flow.svg)
 
-Every restore is destructive — `convex import --replace-all` drops and reloads every table — so
+Every restore is destructive, `convex import --replace-all` drops and reloads every table, so
 the manager forces a pre-restore backup first. If the pre-restore step fails, the restore aborts
 with the original data intact (and the operator sees the failure on the restore job poll).
 
@@ -159,7 +159,7 @@ makes sense in their context:
 
 **`-d postgres-v5-multitenant` is required for shared Postgres.** Convex's documented
 `postgres-v5` mode hardcodes the database name to `carnitas` and rejects URLs that already
-contain one. That means two single-tenant Convex backends cannot share a Postgres cluster — the
+contain one. That means two single-tenant Convex backends cannot share a Postgres cluster, the
 whole "many tenants on one Postgres" value proposition would be impossible. `postgres-v5-multitenant`
 is listed in the CLI help but not in Convex's public docs; it accepts a URL with a real database
 name, requires `--instance-name` + `--instance-secret` as CLI flags (env vars are not enough in
@@ -182,12 +182,12 @@ tenant identity, `DO_NOT_REQUIRE_SSL` for plain Postgres, `DISABLE_BEACON` for t
 `convex-local-backend`. The `generate_key` source (FSL-1.1-Apache-2.0, local build explicitly
 permitted) is a 60-line clap wrapper around `KeyBroker::issue_admin_key`. The Dockerfile builds
 it from the same git tag pinned by `CONVEX_VERSION` so the binary cannot drift from the backend.
-A key generated this way is accepted by the running backend with HTTP 200 — verified end-to-end
+A key generated this way is accepted by the running backend with HTTP 200, verified end-to-end
 against the NAS deployment on 2026-05-26.
 
 **The dashboard switcher is replaced by orchestrator-driven postMessage credentials.** Convex's
 official dashboard image expects `NEXT_PUBLIC_DEFAULT_LIST_DEPLOYMENTS_API_PORT` and fetches
-`http://127.0.0.1:<port>/` for the deployment list — but the `127.0.0.1` resolves on the user's
+`http://127.0.0.1:<port>/` for the deployment list, but the `127.0.0.1` resolves on the user's
 browser, not the dashboard container, so the switcher cannot work for remote access. We ship the
 dashboard static export ourselves (downloaded from the same Convex release tag, sha256-pinned,
 extracted into `dist/dashboard/`) and serve it via host-header routing from the orchestrator's
@@ -198,5 +198,5 @@ origin if the iframe ever redirects (see `src/web/src/pages/DashboardEmbed.tsx`)
 
 ## See also
 
-- [`backups.md`](./backups.md) — operator guide for the backup/restore subsystem
-- [`../openspec/changes/`](../openspec/changes/) — design proposals (active + archived)
+- [`backups.md`](./backups.md), operator guide for the backup/restore subsystem
+- [`deploy-cohosted.md`](./deploy-cohosted.md), running on a host that already has a Traefik with the file provider

@@ -101,14 +101,6 @@ displays them faithfully. Don't run `prettier` on `docs/diagrams/`,
 it's listed in `.prettierignore` and will reformat hand-tuned SVG
 layout into a 100-line-per-attribute mess.
 
-## OpenSpec
-
-Larger changes (new subsystems, schema migrations, anything that touches
-multiple modules) are designed in an OpenSpec change under
-`openspec/changes/<date>-<slug>/` before code lands. Look at the
-archived changes (`openspec/changes/archive/`) for the shape and tone.
-Small fixes and surgical tweaks don't need an OpenSpec.
-
 ## Commit messages
 
 Follow Conventional Commits where it fits, but don't agonize. The release

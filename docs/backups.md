@@ -18,7 +18,7 @@ everything else is identical.
 
 A backup is a single `.zip` produced by the official `convex export --include-file-storage` CLI
 against the instance's deployment URL. The zip contains the full database snapshot **and** every
-file-storage entry. Convex guarantees the snapshot is internally consistent — i.e. the document
+file-storage entry. Convex guarantees the snapshot is internally consistent, i.e. the document
 table and the storage IDs that documents reference are taken at the same logical timestamp.
 
 `--include-file-storage` is non-negotiable. Restoring a backup that lacks file storage with
@@ -28,8 +28,8 @@ the flag for that reason; do not roll your own export pipeline that omits it.
 **What is NOT in a Convex backup zip**, per the
 [Convex docs](https://docs.convex.dev/database/backup-restore):
 
-- **Environment variables** — re-set with `npx convex env set` after a restore
-- **Schema, functions, crons, auth config** — redeploy with `npx convex deploy`
+- **Environment variables**, re-set with `npx convex env set` after a restore
+- **Schema, functions, crons, auth config**, redeploy with `npx convex deploy`
 
 The orchestrator's restore-confirm dialog surfaces this explicitly so a user who, say, expects an
 env var change to roll back along with a restore is not surprised. Tested end-to-end against the
@@ -48,7 +48,7 @@ The `backups` SQLite table mirrors every object with metadata: source (`auto`, `
 
 ## Scheduling
 
-The scheduler lives in the orchestrator's Bun process — no host cron, no extra container. Defaults:
+The scheduler lives in the orchestrator's Bun process, no host cron, no extra container. Defaults:
 
 | Knob                         | Env var                           | Default                               |
 | ---------------------------- | --------------------------------- | ------------------------------------- |
@@ -70,12 +70,12 @@ Per-instance overrides (cron, retention, enabled) come from the UI's "Backup set
 
 The Last-backup column in the overview is the canary. If it shows yellow (> 2× expected interval) or red (> 5×), check the instance detail page → audit log. Likely cases:
 
-- `backup_auto_suspended` event → the instance hit `BACKUP_MAX_CONSECUTIVE_FAILURES`. Fix the underlying issue (e.g. backend OOM, MinIO offline, disk full), then flip the "Automatic backups enabled" toggle off and back on — that clears the suspension and reseeds the schedule.
-- No event at all → check `BACKUP_SCHEDULER_ENABLED`. Boot logs will say `BACKUP_SCHEDULER_ENABLED=false — automatic backups disabled` if it's off.
+- `backup_auto_suspended` event → the instance hit `BACKUP_MAX_CONSECUTIVE_FAILURES`. Fix the underlying issue (e.g. backend OOM, MinIO offline, disk full), then flip the "Automatic backups enabled" toggle off and back on, that clears the suspension and reseeds the schedule.
+- No event at all → check `BACKUP_SCHEDULER_ENABLED`. Boot logs will say `BACKUP_SCHEDULER_ENABLED=false, automatic backups disabled` if it's off.
 
 ### A backup is stuck
 
-`convex export` can deadlock the backend if a prior export didn't finalise — Convex caches an `ExportInProgress` lock that only clears via process restart. The orchestrator detects this by watching for any `running` row older than `BACKUP_EXPORT_TIMEOUT_MINUTES` whose worker no longer owns it. The row gets marked `stuck`, the overview surfaces an orange "stuck" badge, and the detail page shows a banner with a `Force restart backend` button.
+`convex export` can deadlock the backend if a prior export didn't finalise, Convex caches an `ExportInProgress` lock that only clears via process restart. The orchestrator detects this by watching for any `running` row older than `BACKUP_EXPORT_TIMEOUT_MINUTES` whose worker no longer owns it. The row gets marked `stuck`, the overview surfaces an orange "stuck" badge, and the detail page shows a banner with a `Force restart backend` button.
 
 The button:
 
@@ -95,11 +95,11 @@ before the import step aborts the restore with the original data intact.
 
 Two paths, both end in the same `convex import --replace-all --include-file-storage` call:
 
-1. **From the backup list** — pick a row, click `Restore`, type the instance name to confirm.
-2. **From upload** — `Restore from upload…`, pick a `.zip`, type the instance name to confirm. The file is streamed straight to MinIO (no in-RAM buffering) and registered as a `manual-upload` backup row.
+1. **From the backup list**, pick a row, click `Restore`, type the instance name to confirm.
+2. **From upload**, `Restore from upload…`, pick a `.zip`, type the instance name to confirm. The file is streamed straight to MinIO (no in-RAM buffering) and registered as a `manual-upload` backup row.
 
 Before the destructive import runs, the orchestrator takes a `pre-restore` backup. If the
-pre-restore step fails the whole restore is aborted with a 500 — no data is touched. Convex's
+pre-restore step fails the whole restore is aborted with a 500, no data is touched. Convex's
 import command itself enforces that the zip's `INSTANCE_NAME` matches the target deployment; a
 cross-instance restore attempt is rejected with a clear error and the pre-restore backup is
 preserved so you can roll back manually.
@@ -121,7 +121,7 @@ The worker hashes the export zip during upload and re-hashes it from disk after 
 ## Best practices
 
 - **Test restores monthly.** A backup that has never been restored is not a backup. Pick a dev instance, restore the latest snapshot into it, verify the dashboard shows your seed data, then delete it.
-- **Off-site sync for production instances.** The MinIO `<instance>-backups` bucket is a single point of failure if the MinIO volume dies. Add a sidecar that rsyncs new objects to a second target (S3-compatible, restic, whatever). The orchestrator does **not** ship this — it would either be too opinionated (restic / borg) or too half-baked (cron + mc mirror). Add it in your own ops layer.
+- **Off-site sync for production instances.** The MinIO `<instance>-backups` bucket is a single point of failure if the MinIO volume dies. Add a sidecar that rsyncs new objects to a second target (S3-compatible, restic, whatever). The orchestrator does **not** ship this, it would either be too opinionated (restic / borg) or too half-baked (cron + mc mirror). Add it in your own ops layer.
 - **Tune retention for large instances.** A daily 8 GB backup × 30 days = 240 GB. Either raise the retention floor (cheap MinIO) or drop the per-instance retention to 7-14 days via the settings panel.
 - **Watch the disk on the Convex storage volume.** Convex itself never cleans up `exports/*.blob` files after the upload completes; the orchestrator's hourly orphan cleanup handles it, but a misconfigured `CONVEX_STORAGE_DIR_TEMPLATE` would silently bypass it. Sanity-check the path matches the binary's compiled-in directory after a Convex upgrade.
 

@@ -87,15 +87,15 @@ in Chromium).
 ### Auth
 
 By default `/api/*` is **open**. The orchestrator logs a boot-time
-`WARN: ORCHESTRATOR_ADMIN_TOKEN is unset — /api/* is OPEN.` so you do not ship that config to the
+`WARN: ORCHESTRATOR_ADMIN_TOKEN is unset, /api/* is OPEN.` so you do not ship that config to the
 public internet by accident.
 
 Two ways to lock it down:
 
-- **Built-in bearer** — set `ORCHESTRATOR_ADMIN_TOKEN` to ≥16 characters
+- **Built-in bearer**: set `ORCHESTRATOR_ADMIN_TOKEN` to ≥16 characters
   (`openssl rand -hex 32`). The UI prompts on first load, stores it in `localStorage`, and every
   `/api/*` request goes through `timingSafeEqual` against the configured token.
-- **Reverse-proxy auth** — leave the token empty and front the orchestrator with Traefik's
+- **Reverse-proxy auth**: leave the token empty and front the orchestrator with Traefik's
   `basicauth`, Authelia, oauth2-proxy, or Cloudflare Access. The orchestrator honors
   `X-Forwarded-User` for audit attribution **only in open mode**; in bearer mode the audit actor
   is always `admin` to close the spoof vector.
@@ -130,8 +130,8 @@ in-flight job is flipped to `failed` with a marker pointing at the audit log + t
 backup so the operator sees the real state instead of a stuck "importing" forever.
 
 > **What's in a Convex backup zip:** table documents and file storage only. Environment variables,
-> schema, functions, crons, and auth config are **not** included — see
-> [Convex docs](https://docs.convex.dev/database/backup-restore). The orchestrator surfaces this
+> schema, functions, crons, and auth config are **not** included (see
+> [Convex docs](https://docs.convex.dev/database/backup-restore)). The orchestrator surfaces this
 > in the restore-confirm dialog so the operator knows to re-apply env via `npx convex env set` and
 > redeploy code via `npx convex deploy` after a restore.
 
@@ -143,28 +143,46 @@ sync.
 ![Instance lifecycle](./docs/diagrams/instance-lifecycle.svg)
 
 A backend can be `creating`, `running`, `stopped`, or `error`. The supervisor restarts a crashed
-process per `RESTART_DELAYS_MS` (1s, 5s, 30s, 60s, …) up to `MAX_RESTARTS` within a 10-minute
+process per `RESTART_DELAYS_MS` (1s, 5s, 30s, 60s, ...) up to `MAX_RESTARTS` within a 10-minute
 window; past the budget the row flips to `error` with the last exit code in `last_error`. A
 user-initiated `stop` during the backoff window cancels the pending respawn (otherwise the
 setTimeout would silently bring the backend back up after the operator told it to stop). Delete
 requires typing the instance name as confirmation, same UX as Restore.
 
+## Health and monitoring
+
+Three unauthenticated probes for liveness, readiness, and fleet status:
+
+| Endpoint                | Purpose                                                                                                                                                                                                                          |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`           | Liveness, always 200 when the process can answer. Used by the Docker `HEALTHCHECK`.                                                                                                                                              |
+| `GET /ready`            | Readiness, 200 once boot finishes (migrations + traefik write + restoreRunning), 503 before.                                                                                                                                     |
+| `GET /health/instances` | Fleet aggregator. Per-instance status plus an internal reachability probe to each backend's cloud port. 200 when every `running` instance is reachable and nothing is in `error`, 503 otherwise. No version info in the payload. |
+
+For external monitoring (Gatus, Uptime Kuma, anything else), the recommended pattern is
+**end-to-end per instance**: hit `https://<instance>.<BASE_DOMAIN>/version` directly. That
+exercises DNS, TLS, Traefik routing, and the backend process at once. The aggregator endpoint
+is the weaker signal because it only proves the orchestrator can reach the backend on its
+private port; use it for in-UI status badges and local inspection.
+
+See [`docs/architecture.md`](docs/architecture.md) for the full payload shape and the rationale.
+
 ## Documentation
 
-- **[Architecture](./docs/architecture.md)** — component model, data flow, the four diagrams in
+- **[Architecture](./docs/architecture.md)**: component model, data flow, the four diagrams in
   one place with prose, plus the load-bearing design decisions (why
   `postgres-v5-multitenant`, why env-vars-not-flags, why build `generate_key` from source, why
-  postMessage instead of the dashboard switcher)
-- **[Backups & Restore](./docs/backups.md)** — operator guide: retention tuning, force-restart-
-  backend, off-site sync, recovery playbooks
-- **[Co-hosted deployment](./docs/deploy-cohosted.md)** — running on a host that already has a
-  Traefik with the file provider; UI reached via SSH local forward, per-instance Convex URLs
-  stay public
+  postMessage instead of the dashboard switcher).
+- **[Backups and Restore](./docs/backups.md)**: operator guide. Retention tuning,
+  force-restart-backend, off-site sync, recovery playbooks.
+- **[Co-hosted deployment](./docs/deploy-cohosted.md)**: running on a host that already has a
+  Traefik with the file provider. UI reached via SSH local forward, per-instance Convex URLs
+  stay public.
 
 The Dockerfile pulls the Convex backend binary from the official
 `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key`
 from the same git tag (FSL-1.1-Apache-2.0 permits local builds), and bundles the dashboard static
-export — no separate dashboard container needed.
+export. No separate dashboard container needed.
 
 ## License
 
