@@ -11,6 +11,18 @@ export` / `convex import` subprocess and the supervised
   `convex-local-backend` children inherit non-root. Removes the
   "RCE-to-root-in-container" path for any bug in the upload, restore,
   or spawn code.
+  - **Upgrade note from any earlier release.** Existing
+    `orchestrator-data` and `convex-logs` Docker volumes were created
+    by the old root-running container and need a one-off chown so the
+    bun user can write. Stop the container, then:
+    ```sh
+    docker run --rm --user 0 \
+      -v convex-orchestrator_orchestrator-data:/data \
+      -v convex-orchestrator_convex-logs:/logs \
+      alpine sh -c 'chown -R 1000:1000 /data /logs'
+    ```
+    Then bring the container back up. Without this, the orchestrator
+    fails on boot with `SQLITE_READONLY_DIRECTORY`.
 - **Pino logger redact list** for adminKey, instanceSecret, the master
   key, Postgres credentials, S3 secret, MinIO root password. The code
   never logs these today (verified), but the redact rules are defence
