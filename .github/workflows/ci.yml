@@ -99,6 +99,11 @@ jobs:
               sleep 2
             done
           done
+          # The default TRAEFIK_DYNAMIC_PATH lives under /etc/traefik,
+          # which the non-root bun user can't create. In real deploys
+          # this dir is bind-mounted from the host with the right
+          # ownership; in CI we point it at a path inside the writable
+          # /var/lib/orchestrator tree.
           docker run -d --name orch --network orch-ci \
             -e BASE_DOMAIN=cvx.local \
             -e ORCHESTRATOR_MASTER_KEY=$(openssl rand -hex 32) \
@@ -111,6 +116,7 @@ jobs:
             -e S3_ACCESS_KEY=minioadmin \
             -e S3_SECRET_KEY=minio-ci-pw \
             -e CONVEX_BIND_ADDRESS=0.0.0.0 \
+            -e TRAEFIK_DYNAMIC_PATH=/var/lib/orchestrator/traefik/dynamic.yml \
             -e LOG_LEVEL=info \
             -p 8080:8080 \
             convex-orchestrator:test
