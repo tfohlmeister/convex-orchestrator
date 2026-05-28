@@ -133,10 +133,10 @@ jobs:
             echo 'orchestrator did not become healthy within 60s'
             exit 1
           fi
-          # /readyz should also be green by now (instances replayed,
+          # /ready should also be green by now (instances replayed,
           # postgres reachable). And the auth-mode probe should report
           # bearer since we set the token.
-          curl -fsS http://localhost:8080/readyz
+          curl -fsS http://localhost:8080/ready
           mode=$(curl -fsS http://localhost:8080/api/auth/mode)
           echo "auth-mode: $mode"
           [ "$mode" = '{"mode":"bearer"}' ] || { echo "unexpected mode"; exit 1; }
