@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Security
+
+- **Orchestrator container now runs as non-root** (`USER bun`, uid 1000),
+  matching the host's `tf` user on the co-hosted deploy so the shared
+  Traefik dynamic-config dir bind-mount stays writable. The `convex
+  export` / `convex import` subprocess and the supervised
+  `convex-local-backend` children inherit non-root. Removes the
+  "RCE-to-root-in-container" path for any bug in the upload, restore,
+  or spawn code.
+- **Pino logger redact list** for adminKey, instanceSecret, the master
+  key, Postgres credentials, S3 secret, MinIO root password. The code
+  never logs these today (verified), but the redact rules are defence
+  in depth against an accidental `logger.info({ instance })` or
+  `logger.info({ config })` slip.
+
 ### Fixed
 
 - **Pre-restore backup no longer dies at the convex CLI login prompt.**

@@ -127,13 +127,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && printf '{"name":"orchestrator-convex-cli","private":true,"version":"0.0.0","dependencies":{"convex":"%s"}}\n' "${CONVEX_CLI_VERSION}" > /convex-cli-cwd/package.json
 
 WORKDIR /app
-COPY --from=convex-backend-bin /out/convex-local-backend /convex/convex-local-backend
-COPY --from=convex-genkey /generate_key /convex/generate_key
-COPY --from=server-build /app/dist/server ./dist/server
-COPY --from=web-build /app/dist/web ./dist/web
-COPY --from=convex-dashboard /out ./dist/dashboard
+# Non-root user provided by oven/bun base image (uid 1000). Copies use it
+# directly so the bun process can read the binaries + execute the convex
+# local backend + generate_key wrappers without sudo.
+COPY --from=convex-backend-bin --chown=bun:bun /out/convex-local-backend /convex/convex-local-backend
+COPY --from=convex-genkey --chown=bun:bun /generate_key /convex/generate_key
+COPY --from=server-build --chown=bun:bun /app/dist/server ./dist/server
+COPY --from=web-build --chown=bun:bun /app/dist/web ./dist/web
+COPY --from=convex-dashboard --chown=bun:bun /out ./dist/dashboard
 
-RUN mkdir -p /var/log/convex /var/lib/orchestrator /var/lib/orchestrator/backup-work
+# Writable runtime dirs owned by bun so the process can write SQLite,
+# rotating logs, and the backup work tree without elevation. The shared
+# Traefik dynamic-config dir (/etc/traefik/dynamic) is mounted from the
+# host with whatever ownership the host has and gets chowned at startup
+# only if writable; we don't pre-create it here.
+RUN mkdir -p /var/log/convex /var/lib/orchestrator /var/lib/orchestrator/backup-work \
+    && chown -R bun:bun /var/log/convex /var/lib/orchestrator /convex /convex-cli-cwd
+
+USER bun
 
 ENV HTTP_PORT=8080 \
     DATA_DIR=/var/lib/orchestrator \
