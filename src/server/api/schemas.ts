@@ -45,6 +45,15 @@ export const BackupConfigSchema = z
   })
   .strict();
 
+// Per-instance scheduled-restart config. `null` cron clears the override
+// back to RESTART_DEFAULT_CRON; `null` enabled clears the opt-in.
+export const RestartConfigSchema = z
+  .object({
+    cron: z.string().min(1).nullable().optional(),
+    enabled: z.boolean().nullable().optional(),
+  })
+  .strict();
+
 export const RestoreSchema = z.object({
   backupId: z.string().min(1),
   confirmName: InstanceNameSchema,
@@ -55,4 +64,5 @@ export type SetDisplayNameInput = z.infer<typeof SetDisplayNameSchema>;
 export type DeleteConfirmInput = z.infer<typeof DeleteConfirmSchema>;
 export type LogsQuery = z.infer<typeof LogsQuerySchema>;
 export type BackupConfigInput = z.infer<typeof BackupConfigSchema>;
+export type RestartConfigInput = z.infer<typeof RestartConfigSchema>;
 export type RestoreInput = z.infer<typeof RestoreSchema>;

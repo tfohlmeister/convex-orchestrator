@@ -25,6 +25,8 @@ function makeInstance(name = 'inst-a'): Instance {
     backupRetentionDays: null,
     backupEnabled: null,
     backupSuspended: false,
+    restartCron: null,
+    restartEnabled: null,
   };
 }
 
@@ -82,13 +84,15 @@ interface Harness {
   handles: FakeHandle[];
   statusChanges: { name: string; status: string; lastError?: string }[];
   resourceSamples: ResourceSample[];
+  killedPids: number[];
 }
 
-function setupHarness(opts?: { spawnFails?: boolean }): Harness {
+function setupHarness(opts?: { spawnFails?: boolean; descendants?: number[] }): Harness {
   const handles: FakeHandle[] = [];
   const spawnCalls: SpawnConfig[] = [];
   const statusChanges: Harness['statusChanges'] = [];
   const resourceSamples: ResourceSample[] = [];
+  const killedPids: number[] = [];
 
   const spawnFn = async (cfg: SpawnConfig): Promise<SpawnHandle> => {
     spawnCalls.push(cfg);
@@ -115,6 +119,10 @@ function setupHarness(opts?: { spawnFails?: boolean }): Harness {
       statusChanges.push({ name, status, ...(lastError !== undefined ? { lastError } : {}) });
     },
     spawn: spawnFn,
+    // Simulate the backend's executor subtree (e.g. the Node action runner)
+    // so the reaping path is exercised without a real process tree.
+    listDescendants: () => Promise.resolve(opts?.descendants ?? []),
+    killProcess: (pid) => killedPids.push(pid),
   };
 
   return {
@@ -123,6 +131,7 @@ function setupHarness(opts?: { spawnFails?: boolean }): Harness {
     handles,
     statusChanges,
     resourceSamples,
+    killedPids,
   };
 }
 
@@ -172,6 +181,16 @@ describe('Supervisor.stop', () => {
   test('stop on an unknown instance is a no-op', async () => {
     await h.supervisor.stop('never-started');
     expect(h.statusChanges).toEqual([]);
+  });
+
+  test('reaps the backend descendant processes (executor leak fix)', async () => {
+    // The backend's Node executor does not exit with its parent; without
+    // reaping it would leak its (multi-GB) heap on every stop/restart.
+    const reaper = setupHarness({ descendants: [4242, 4243] });
+    await reaper.supervisor.start(makeInstance('a'));
+    await reaper.supervisor.stop('a');
+    expect(reaper.killedPids).toEqual([4242, 4243]);
+    await reaper.supervisor.stopAllForShutdown();
   });
 });
 

@@ -22,6 +22,7 @@ import {
   DeleteConfirmSchema,
   InstanceNameSchema,
   LogsQuerySchema,
+  RestartConfigSchema,
   RestoreSchema,
   SetDisplayNameSchema,
 } from './schemas.ts';
@@ -224,6 +225,8 @@ export function buildRoutes(deps: RouteDeps): Hono {
           backupRetentionDays: inst.backupRetentionDays,
           backupEnabled: inst.backupEnabled,
           backupSuspended: inst.backupSuspended,
+          restartCron: inst.restartCron,
+          restartEnabled: inst.restartEnabled,
         },
         samples,
         storageSamples,
@@ -471,10 +474,7 @@ export function buildRoutes(deps: RouteDeps): Hono {
       const body = BackupConfigSchema.parse(await c.req.json());
       // Validate cron if present (manager also re-validates but failing the
       // 400 early gives the UI a clearer error).
-      if (typeof body.cron === 'string') {
-        const { parseCron } = await import('../backups/cron.ts');
-        parseCron(body.cron);
-      }
+      if (typeof body.cron === 'string') await assertValidCron(body.cron);
       void inst;
       const update: {
         cron?: string | null;
@@ -501,6 +501,35 @@ export function buildRoutes(deps: RouteDeps): Hono {
         backupRetentionDays: refreshed.backupRetentionDays,
         backupEnabled: refreshed.backupEnabled,
         backupSuspended: refreshed.backupSuspended,
+      });
+    } catch (err: unknown) {
+      return errorResponse(c, err);
+    }
+  });
+
+  app.put('/api/instances/:name/restart-config', requireBearer, async (c) => {
+    try {
+      const name = InstanceNameSchema.parse(c.req.param('name'));
+      deps.orchestrator.get(name);
+      const body = RestartConfigSchema.parse(await c.req.json());
+      // Validate cron early for a clear 400 (the scheduler also re-validates
+      // on its next tick).
+      if (typeof body.cron === 'string') await assertValidCron(body.cron);
+      const update: { cron?: string | null; enabled?: boolean | null } = {};
+      if (body.cron !== undefined) update.cron = body.cron;
+      if (body.enabled !== undefined) update.enabled = body.enabled;
+      deps.orchestrator.updateRestartConfig(name, update);
+      deps.audit.record({
+        at: Date.now(),
+        actor: actorOf(c),
+        action: 'restart_config_updated',
+        instanceName: name,
+        details: JSON.stringify(update),
+      });
+      const refreshed = deps.orchestrator.get(name);
+      return c.json({
+        restartCron: refreshed.restartCron,
+        restartEnabled: refreshed.restartEnabled,
       });
     } catch (err: unknown) {
       return errorResponse(c, err);
@@ -542,6 +571,22 @@ export function buildRoutes(deps: RouteDeps): Hono {
 
 function actorOfFromHeader(c: Context): string {
   return c.req.header('x-forwarded-user') ?? 'admin';
+}
+
+// Reject an invalid cron with a 400 (parseCron throws a plain Error, which
+// would otherwise fall through to a 500). Shared by the backup-config and
+// restart-config routes.
+async function assertValidCron(raw: string): Promise<void> {
+  const { parseCron } = await import('../scheduling/cron.ts');
+  try {
+    parseCron(raw);
+  } catch (err: unknown) {
+    throw new OrchestratorError(
+      400,
+      'INVALID_CRON',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 export interface InstanceHealth {

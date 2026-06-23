@@ -46,6 +46,11 @@ export interface BackupConfig {
   backupSuspended: boolean;
 }
 
+export interface RestartConfig {
+  restartCron: string | null;
+  restartEnabled: boolean | null;
+}
+
 export interface RestoreJob {
   id: string;
   instanceName: string;
@@ -95,6 +100,8 @@ export interface InstanceDetail {
     backupRetentionDays: number | null;
     backupEnabled: boolean | null;
     backupSuspended: boolean;
+    restartCron: string | null;
+    restartEnabled: boolean | null;
   };
   samples: SampleWithCpu[];
   storageSamples: StorageSample[];
@@ -241,6 +248,14 @@ export const api = {
         cron: cfg.backupCron,
         retentionDays: cfg.backupRetentionDays,
         enabled: cfg.backupEnabled,
+      }),
+    }),
+  updateRestartConfig: (name: string, cfg: Partial<RestartConfig>) =>
+    request<RestartConfig>(`/api/instances/${name}/restart-config`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        cron: cfg.restartCron,
+        enabled: cfg.restartEnabled,
       }),
     }),
   forceRestartBackend: (name: string) =>

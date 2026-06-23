@@ -313,6 +313,8 @@ describe('Orchestrator.restoreRunning', () => {
         backupRetentionDays: null,
         backupEnabled: null,
         backupSuspended: false,
+        restartCron: null,
+        restartEnabled: null,
       });
     };
     seed('a');

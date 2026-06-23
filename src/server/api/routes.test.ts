@@ -510,3 +510,153 @@ describe('display name routes', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('restart-config route', () => {
+  // Mutable per-instance state the stub orchestrator reads/writes so the
+  // route's "update then return refreshed" flow can be asserted end-to-end.
+  function buildApp() {
+    const state: { restartCron: string | null; restartEnabled: boolean | null } = {
+      restartCron: null,
+      restartEnabled: null,
+    };
+    const calls: Array<{ cron?: string | null; enabled?: boolean | null }> = [];
+    const orchestrator = {
+      get: (name: string) => ({ name, ...state }),
+      updateRestartConfig: (
+        _name: string,
+        cfg: { cron?: string | null; enabled?: boolean | null },
+      ) => {
+        calls.push(cfg);
+        if (cfg.cron !== undefined) state.restartCron = cfg.cron;
+        if (cfg.enabled !== undefined) state.restartEnabled = cfg.enabled;
+      },
+    } as unknown as RouteDeps['orchestrator'];
+    const config = {
+      ORCHESTRATOR_ADMIN_TOKEN: '',
+      EXTERNAL_SCHEME: 'http',
+      EXTERNAL_PORT_SUFFIX: '',
+      BASE_DOMAIN: 'cvx.lan',
+    } as unknown as Config;
+    const app = buildRoutes({
+      orchestrator,
+      config,
+      samples: {} as unknown as RouteDeps['samples'],
+      storage: {} as unknown as RouteDeps['storage'],
+      audit: { record: () => undefined } as unknown as RouteDeps['audit'],
+      backups: {} as unknown as RouteDeps['backups'],
+      backupManager: {} as unknown as RouteDeps['backupManager'],
+      restoreManager: {} as unknown as RouteDeps['restoreManager'],
+      minio: {} as unknown as RouteDeps['minio'],
+      ready: () => true,
+    });
+    return { app, calls };
+  }
+
+  function put(app: ReturnType<typeof buildApp>['app'], body: unknown) {
+    return app.request('/api/instances/lucky-otter-123/restart-config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  test('valid cron + enabled round-trips and returns the refreshed config', async () => {
+    const { app, calls } = buildApp();
+    const res = await put(app, { cron: '0 4 * * *', enabled: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ restartCron: '0 4 * * *', restartEnabled: true });
+    expect(calls).toEqual([{ cron: '0 4 * * *', enabled: true }]);
+  });
+
+  test('enabled-only update leaves cron untouched', async () => {
+    const { app, calls } = buildApp();
+    const res = await put(app, { enabled: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ restartCron: null, restartEnabled: true });
+    expect(calls).toEqual([{ enabled: true }]);
+  });
+
+  test('null cron clears the override', async () => {
+    const { app, calls } = buildApp();
+    const res = await put(app, { cron: null });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ restartCron: null, restartEnabled: null });
+    expect(calls).toEqual([{ cron: null }]);
+  });
+
+  test('invalid cron is rejected with 400 INVALID_CRON before any write', async () => {
+    const { app, calls } = buildApp();
+    const res = await put(app, { cron: 'not a cron', enabled: true });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('INVALID_CRON');
+    expect(calls).toEqual([]);
+  });
+
+  test('unknown field is rejected by the strict schema', async () => {
+    const { app } = buildApp();
+    const res = await put(app, { retentionDays: 5 });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('backup-config route cron validation', () => {
+  // The backup-config route shares assertValidCron with restart-config; this
+  // pins its 400-on-invalid-cron path (it previously fell through to a 500).
+  function buildApp() {
+    const calls: Array<Record<string, unknown>> = [];
+    const orchestrator = {
+      get: (name: string) => ({
+        name,
+        backupCron: null,
+        backupRetentionDays: null,
+        backupEnabled: null,
+        backupSuspended: false,
+      }),
+      updateBackupConfig: (_name: string, cfg: Record<string, unknown>) => calls.push(cfg),
+    } as unknown as RouteDeps['orchestrator'];
+    const config = {
+      ORCHESTRATOR_ADMIN_TOKEN: '',
+      EXTERNAL_SCHEME: 'http',
+      EXTERNAL_PORT_SUFFIX: '',
+      BASE_DOMAIN: 'cvx.lan',
+    } as unknown as Config;
+    const app = buildRoutes({
+      orchestrator,
+      config,
+      samples: {} as unknown as RouteDeps['samples'],
+      storage: {} as unknown as RouteDeps['storage'],
+      audit: { record: () => undefined } as unknown as RouteDeps['audit'],
+      backups: {} as unknown as RouteDeps['backups'],
+      backupManager: {} as unknown as RouteDeps['backupManager'],
+      restoreManager: {} as unknown as RouteDeps['restoreManager'],
+      minio: {} as unknown as RouteDeps['minio'],
+      ready: () => true,
+    });
+    return { app, calls };
+  }
+
+  function put(app: ReturnType<typeof buildApp>['app'], body: unknown) {
+    return app.request('/api/instances/lucky-otter-123/backup-config', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  test('invalid cron is rejected with 400 INVALID_CRON before any write', async () => {
+    const { app, calls } = buildApp();
+    const res = await put(app, { cron: 'not a cron' });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('INVALID_CRON');
+    expect(calls).toEqual([]);
+  });
+
+  test('valid cron is accepted', async () => {
+    const { app, calls } = buildApp();
+    const res = await put(app, { cron: '0 3 * * *', enabled: true });
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ cron: '0 3 * * *', enabled: true, suspended: false }]);
+  });
+});

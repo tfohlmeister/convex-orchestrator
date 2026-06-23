@@ -77,6 +77,19 @@ const envSchema = z.object({
   // millions of objects from locking up the sampler. 100 pages × 1000 keys =
   // 100k objects per bucket per tick.
   STORAGE_SCAN_PAGE_LIMIT: z.coerce.number().int().min(1).default(100),
+  // ---------------- Scheduled restart ----------------
+  // Master switch for the per-instance scheduled-restart scheduler. When
+  // false the scheduler thread doesn't start; manual force-restart-backend
+  // still works. Per-instance opt-in is via restart_enabled on each row.
+  RESTART_SCHEDULER_ENABLED: z
+    .string()
+    .transform((v) => v.toLowerCase() !== 'false' && v !== '0')
+    .default('true'),
+  // Default cron used when an instance is restart-enabled but has no
+  // `restart_cron` override. Local time. 04:00 daily — after the 03:00
+  // default backup cron so a restart never interrupts the day's backup.
+  RESTART_DEFAULT_CRON: z.string().default('0 4 * * *'),
+
   // ---------------- Backup / restore ----------------
   // Master switch. When false the scheduler thread doesn't start; manual
   // /backup + /restore endpoints still work.

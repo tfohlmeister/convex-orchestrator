@@ -3,10 +3,45 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDatabase, type DB } from './index.ts';
-import { ResourceSampleRepo, StorageSampleRepo, type StorageSample } from './repos.ts';
+import {
+  InstanceRepo,
+  ResourceSampleRepo,
+  StorageSampleRepo,
+  type StorageSample,
+} from './repos.ts';
+import type { Instance } from '../supervisor/types.ts';
 
 let tmp: string;
 let db: DB;
+
+// 64-hex master key for the InstanceRepo at-rest encryption (admin key +
+// instance secret). Test-only.
+const TEST_MASTER_KEY = '0'.repeat(64);
+
+function fullInstance(name: string): Instance {
+  const now = Date.now();
+  return {
+    name,
+    displayName: null,
+    status: 'running',
+    baseDomain: 'test.local',
+    cloudPort: 13210,
+    sitePort: 13211,
+    adminKey: 'admin-key',
+    instanceSecret: 'instance-secret',
+    postgresSchema: 'public',
+    bucketPrefix: name,
+    createdAt: now,
+    updatedAt: now,
+    lastError: null,
+    backupCron: null,
+    backupRetentionDays: null,
+    backupEnabled: null,
+    backupSuspended: false,
+    restartCron: null,
+    restartEnabled: null,
+  };
+}
 
 // Raw SQL to satisfy the resource_samples + storage_samples FK without
 // going through InstanceRepo (which encrypts the admin key etc. — far
@@ -189,5 +224,43 @@ describe('StorageSampleRepo', () => {
     repo.pruneOlderThan(200);
     const out = repo.recentFor('foo', 0);
     expect(out.map((s) => s.takenAt)).toEqual([200, 300]);
+  });
+});
+
+describe('InstanceRepo.updateRestartConfig', () => {
+  test('round-trips restart cron + enabled and applies partial updates', () => {
+    const repo = new InstanceRepo(db, TEST_MASTER_KEY);
+    repo.insert(fullInstance('foo'));
+
+    // Fresh instance: both null (opt-in off).
+    expect(repo.get('foo')?.restartCron).toBeNull();
+    expect(repo.get('foo')?.restartEnabled).toBeNull();
+
+    // Set both.
+    repo.updateRestartConfig('foo', { cron: '0 4 * * *', enabled: true });
+    expect(repo.get('foo')?.restartCron).toBe('0 4 * * *');
+    expect(repo.get('foo')?.restartEnabled).toBe(true);
+
+    // Partial: flip enabled only, cron untouched.
+    repo.updateRestartConfig('foo', { enabled: false });
+    expect(repo.get('foo')?.restartCron).toBe('0 4 * * *');
+    expect(repo.get('foo')?.restartEnabled).toBe(false);
+
+    // Clear cron back to the orchestrator default.
+    repo.updateRestartConfig('foo', { cron: null });
+    expect(repo.get('foo')?.restartCron).toBeNull();
+    expect(repo.get('foo')?.restartEnabled).toBe(false);
+  });
+
+  test('does not touch the backup config', () => {
+    const repo = new InstanceRepo(db, TEST_MASTER_KEY);
+    repo.insert(fullInstance('bar'));
+    repo.updateBackupConfig('bar', { cron: '0 3 * * *', enabled: true });
+    repo.updateRestartConfig('bar', { cron: '0 4 * * *', enabled: true });
+    const inst = repo.get('bar');
+    expect(inst?.backupCron).toBe('0 3 * * *');
+    expect(inst?.backupEnabled).toBe(true);
+    expect(inst?.restartCron).toBe('0 4 * * *');
+    expect(inst?.restartEnabled).toBe(true);
   });
 });

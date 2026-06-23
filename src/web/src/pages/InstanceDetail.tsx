@@ -19,6 +19,7 @@ import { EditableTitle } from '../components/EditableTitle';
 import { ConnectionPanel } from '../components/ConnectionPanel';
 import { EndpointsPanel } from '../components/EndpointsPanel';
 import { BackupsSection, BackupSettings } from '../components/BackupsSection';
+import { RestartSettings } from '../components/RestartSettings';
 
 // Fixed colour + order for the storage breakdown so the legend is stable.
 // Editorial palette: muted earth tones, accent rust as the focal series.
@@ -234,6 +235,13 @@ export function InstanceDetailPage() {
               backupRetentionDays: instance.backupRetentionDays,
               backupEnabled: instance.backupEnabled,
               backupSuspended: instance.backupSuspended,
+            }}
+          />
+          <RestartSettings
+            instanceName={instance.name}
+            initial={{
+              restartCron: instance.restartCron,
+              restartEnabled: instance.restartEnabled,
             }}
           />
         </div>

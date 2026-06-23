@@ -20,6 +20,8 @@ interface InstanceRow {
   backup_retention_days: number | null;
   backup_enabled: number | null;
   backup_suspended: number;
+  restart_cron: string | null;
+  restart_enabled: number | null;
 }
 
 export class InstanceRepo {
@@ -36,8 +38,9 @@ export class InstanceRepo {
           admin_key_enc, instance_secret_enc,
           postgres_schema, bucket_prefix,
           created_at, updated_at, last_error,
-          backup_cron, backup_retention_days, backup_enabled, backup_suspended
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          backup_cron, backup_retention_days, backup_enabled, backup_suspended,
+          restart_cron, restart_enabled
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         instance.name,
@@ -57,6 +60,8 @@ export class InstanceRepo {
         instance.backupRetentionDays,
         instance.backupEnabled === null ? null : instance.backupEnabled ? 1 : 0,
         instance.backupSuspended ? 1 : 0,
+        instance.restartCron,
+        instance.restartEnabled === null ? null : instance.restartEnabled ? 1 : 0,
       );
   }
 
@@ -98,6 +103,30 @@ export class InstanceRepo {
     if (cfg.suspended !== undefined) {
       sets.push('backup_suspended = ?');
       args.push(cfg.suspended ? 1 : 0);
+    }
+    if (sets.length === 0) return;
+    sets.push('updated_at = ?');
+    args.push(Date.now());
+    args.push(name);
+    this.db.prepare(`UPDATE instances SET ${sets.join(', ')} WHERE name = ?`).run(...args);
+  }
+
+  updateRestartConfig(
+    name: string,
+    cfg: {
+      cron?: string | null;
+      enabled?: boolean | null;
+    },
+  ): void {
+    const sets: string[] = [];
+    const args: (string | number | null)[] = [];
+    if (cfg.cron !== undefined) {
+      sets.push('restart_cron = ?');
+      args.push(cfg.cron);
+    }
+    if (cfg.enabled !== undefined) {
+      sets.push('restart_enabled = ?');
+      args.push(cfg.enabled === null ? null : cfg.enabled ? 1 : 0);
     }
     if (sets.length === 0) return;
     sets.push('updated_at = ?');
@@ -151,6 +180,8 @@ export class InstanceRepo {
       backupRetentionDays: row.backup_retention_days,
       backupEnabled: row.backup_enabled === null ? null : row.backup_enabled === 1,
       backupSuspended: row.backup_suspended === 1,
+      restartCron: row.restart_cron,
+      restartEnabled: row.restart_enabled === null ? null : row.restart_enabled === 1,
     };
   }
 }

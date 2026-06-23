@@ -10,6 +10,7 @@ import type { Supervisor } from './supervisor/supervisor.ts';
 import type { Instance } from './supervisor/types.ts';
 import type { TraefikWriter } from './traefik/writer.ts';
 import type { BackupManager } from './backups/manager.ts';
+import type { RestartManager } from './restarts/manager.ts';
 import { OrchestratorError } from './api/errors.ts';
 import { cloudUrl } from './urls.ts';
 
@@ -28,6 +29,9 @@ export interface OrchestratorDeps {
   // BackupManager (the latter currently depends on Orchestrator via
   // forceRestartBackend). Set via attachBackupManager after both exist.
   backupManager?: BackupManager;
+  // Optional, set via attachRestartManager after both exist. Only used to
+  // purge per-instance scheduler state on delete.
+  restartManager?: RestartManager;
   // Optional generateAdminKey override for tests. Production wires the
   // real binary-spawning helper from ./storage/admin-key.ts; tests
   // pass a deterministic stub so create() doesn't need a real binary.
@@ -41,6 +45,13 @@ export class Orchestrator {
   // (BackupManager needs forceRestartBackend on Orchestrator).
   attachBackupManager(manager: BackupManager): void {
     this.deps.backupManager = manager;
+  }
+
+  // Wire the RestartManager after construction (it needs scheduledRestart on
+  // Orchestrator, which needs the supervisor — same circular-dep break as the
+  // BackupManager).
+  attachRestartManager(manager: RestartManager): void {
+    this.deps.restartManager = manager;
   }
 
   list(): Instance[] {
@@ -94,6 +105,8 @@ export class Orchestrator {
       backupRetentionDays: null,
       backupEnabled: null,
       backupSuspended: false,
+      restartCron: null,
+      restartEnabled: null,
     };
     this.deps.instances.insert(instance);
     this.deps.audit.record({ at: now, actor, action: 'create', instanceName: name });
@@ -140,6 +153,7 @@ export class Orchestrator {
     // Purge backup-scheduler state so a same-name recreate gets a fresh
     // schedule instead of inheriting the predecessor's nextFire timestamp.
     this.deps.backupManager?.dropInstance(name);
+    this.deps.restartManager?.dropInstance(name);
     this.deps.audit.record({ at: Date.now(), actor, action: 'delete', instanceName: name });
   }
 
@@ -169,6 +183,19 @@ export class Orchestrator {
     this.deps.instances.updateBackupConfig(name, cfg);
   }
 
+  // Pass-through to InstanceRepo for the per-instance scheduled-restart
+  // config. Validates the instance exists.
+  updateRestartConfig(
+    name: string,
+    cfg: {
+      cron?: string | null;
+      enabled?: boolean | null;
+    },
+  ): void {
+    this.get(name);
+    this.deps.instances.updateRestartConfig(name, cfg);
+  }
+
   // Hard-restart the backend for a stuck export. SIGTERM via supervisor.stop
   // unblocks the Convex `ExportInProgress` lock (only resolves via process
   // restart). Re-spawns immediately and re-attaches the Traefik route.
@@ -181,6 +208,23 @@ export class Orchestrator {
       at: Date.now(),
       actor,
       action: 'backend_restart_for_stuck_export',
+      instanceName: name,
+    });
+  }
+
+  // Cron-triggered restart to reclaim the backend + executor memory that
+  // self-hosted Convex never frees at runtime. Same stop+respawn as
+  // forceRestartBackend (supervisor.stop reaps the executor subtree), but
+  // audited as a scheduled action. Called by the RestartManager.
+  async scheduledRestart(name: string): Promise<void> {
+    const inst = this.get(name);
+    this.deps.logger.info({ name }, 'scheduled-restart (memory reclamation)');
+    await this.deps.supervisor.stop(name);
+    await this.spawnAndRoute(inst);
+    this.deps.audit.record({
+      at: Date.now(),
+      actor: 'restart-scheduler',
+      action: 'backend_restart_scheduled',
       instanceName: name,
     });
   }

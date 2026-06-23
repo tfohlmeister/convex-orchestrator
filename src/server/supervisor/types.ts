@@ -27,6 +27,12 @@ export interface Instance {
   // True after consecutive backup failures suspended automatic scheduling.
   // Cleared by manual re-enable.
   backupSuspended: boolean;
+  // Per-instance scheduled-restart config. Restarting the backend on a cron
+  // reclaims the executor's V8/heap memory that self-hosted Convex does not
+  // release at runtime. Opt-in: restartEnabled null/false → no schedule.
+  // restartCron null with restartEnabled true → use RESTART_DEFAULT_CRON.
+  restartCron: string | null;
+  restartEnabled: boolean | null;
 }
 
 export interface ProcessState {

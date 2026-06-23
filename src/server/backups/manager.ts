@@ -8,7 +8,7 @@ import type { MinioStorage } from '../storage/minio.ts';
 import type { Instance } from '../supervisor/types.ts';
 import { runExport } from './cli.ts';
 import { streamFileToBackup, hashFile } from './upload.ts';
-import { parseCron, nextCronFire, type CronExpr } from './cron.ts';
+import { CronTicker, msUntilNextMinute } from '../scheduling/cron-ticker.ts';
 
 export interface BackupManagerDeps {
   config: Config;
@@ -57,25 +57,22 @@ export class BackupManager {
   private stuckTimer: ReturnType<typeof setInterval> | null = null;
   private queue: QueuedJob[] = [];
   private activeCount = 0;
-  // Track the next scheduled fire-time per instance so a single tick doesn't
-  // requeue an instance whose minute hasn't ticked over yet.
-  private nextFire = new Map<string, number>();
-  // Per-instance cron parse cache. Invalidated whenever the row's
-  // backup_cron changes (cheap: parseCron is O(field-size)).
-  private cronCache = new Map<string, { raw: string; expr: CronExpr }>();
+  // Cron parse cache + next-fire bookkeeping for the auto-backup schedule.
+  private ticker: CronTicker;
   // Running jobs are tracked by backup id so the stuck-detector can find
   // them and the API endpoint can check liveness.
   private inflight = new Set<string>();
 
-  constructor(private readonly deps: BackupManagerDeps) {}
+  constructor(private readonly deps: BackupManagerDeps) {
+    this.ticker = new CronTicker(deps.logger, 'backup');
+  }
 
   // Called from Orchestrator.delete to purge per-instance scheduler state.
   // Without this, a delete + recreate of the same name within the same
-  // process inherits the stale nextFire timestamp, silently skipping the
+  // process inherits the stale next-fire timestamp, silently skipping the
   // fresh instance's first auto-backup window.
   dropInstance(name: string): void {
-    this.nextFire.delete(name);
-    this.cronCache.delete(name);
+    this.ticker.dropInstance(name);
   }
 
   start(): void {
@@ -173,7 +170,7 @@ export class BackupManager {
       enabled: true,
       suspended: false,
     });
-    this.nextFire.delete(instanceName);
+    this.ticker.dropInstance(instanceName);
     this.deps.audit.record({
       at: Date.now(),
       actor,
@@ -192,40 +189,15 @@ export class BackupManager {
       if (inst.status !== 'running') continue;
       const enabled = inst.backupEnabled ?? true;
       if (!enabled || inst.backupSuspended) continue;
-      let expr = this.cronCache.get(inst.name);
       const raw = inst.backupCron ?? this.deps.config.BACKUP_DEFAULT_CRON;
-      if (!expr || expr.raw !== raw) {
-        try {
-          expr = { raw, expr: parseCron(raw) };
-          this.cronCache.set(inst.name, expr);
-        } catch (err: unknown) {
-          this.deps.logger.error(
-            { name: inst.name, raw, err: errMsg(err) },
-            'invalid backup cron, skipping instance',
-          );
-          continue;
-        }
-      }
-      let next = this.nextFire.get(inst.name);
-      if (next == null || next <= now) {
-        // First seen, or we just consumed it — compute the next fire-time.
-        const computed = nextCronFire(expr.expr, now - 60_000);
-        if (computed == null) continue;
-        next = computed;
-        this.nextFire.set(inst.name, next);
-      }
-      if (next <= now) {
-        // Due — enqueue an auto backup and advance to the following fire.
-        this.queue.push({
-          id: this.allocateId(),
-          instance: inst,
-          source: 'auto',
-          triggerReason: `cron ${expr.raw}`,
-        });
-        const after = nextCronFire(expr.expr, next);
-        if (after != null) this.nextFire.set(inst.name, after);
-        else this.nextFire.delete(inst.name);
-      }
+      if (!this.ticker.due(inst.name, raw, now)) continue;
+      // Due — enqueue an auto backup (the ticker already advanced next-fire).
+      this.queue.push({
+        id: this.allocateId(),
+        instance: inst,
+        source: 'auto',
+        triggerReason: `cron ${raw}`,
+      });
     }
     await this.tryDrainQueue();
   }
@@ -381,7 +353,7 @@ export class BackupManager {
       const fails = this.deps.backups.consecutiveAutoFailures(job.instance.name);
       if (fails >= this.deps.config.BACKUP_MAX_CONSECUTIVE_FAILURES) {
         this.deps.instances.updateBackupConfig(job.instance.name, { suspended: true });
-        this.nextFire.delete(job.instance.name);
+        this.ticker.dropInstance(job.instance.name);
         this.deps.audit.record({
           at: completedAt,
           actor: 'scheduler',
@@ -504,10 +476,6 @@ export class BackupManager {
   private deploymentUrl(inst: Instance): string {
     return `http://${this.deps.internalHost}:${inst.cloudPort}`;
   }
-}
-
-function msUntilNextMinute(): number {
-  return 60_000 - (Date.now() % 60_000);
 }
 
 function errMsg(err: unknown): string {

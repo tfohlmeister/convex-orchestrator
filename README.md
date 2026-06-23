@@ -138,6 +138,26 @@ backup so the operator sees the real state instead of a stuck "importing" foreve
 See [`docs/backups.md`](docs/backups.md) for retention tuning, recovery playbooks, and off-site
 sync.
 
+## Scheduled restart
+
+Self-hosted Convex does not release the Node executor's V8/heap memory at runtime: a long-lived
+backend (and the executor subprocess it spawns to run Node actions) grows until the process is
+restarted. Left unattended this eventually exhausts host memory. The orchestrator can restart each
+backend on its own cron to reclaim that memory.
+
+- **Opt-in per instance** from the instance's _Backups · Settings_ tab (cron + an enable toggle),
+  or via `PUT /api/instances/:name/restart-config` (`{ "cron": "0 4 * * *", "enabled": true }`).
+- **Default cron** when enabled without an override: `RESTART_DEFAULT_CRON` (04:00 daily, after the
+  03:00 backup default so a restart never interrupts the day's backup).
+- **Master switch**: `RESTART_SCHEDULER_ENABLED` (default on). Manual `force-restart-backend` works
+  regardless.
+- **Executor reaping**: every stop/restart now SIGKILLs the backend's descendant processes
+  (chiefly the action executor), which would otherwise be reparented to PID 1 and keep their heap.
+  This is what makes a restart actually free memory.
+
+A scheduled restart is a brief interruption (a few seconds) of that one backend; other instances
+are untouched.
+
 ## Instance lifecycle
 
 ![Instance lifecycle](./docs/diagrams/instance-lifecycle.svg)

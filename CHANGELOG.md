@@ -31,6 +31,24 @@ export` / `convex import` subprocess and the supervised
 
 ### Fixed
 
+- **Invalid cron in the backup/restart config endpoints now returns 400,
+  not 500.** `PUT /backup-config` and `PUT /restart-config` validated the
+  cron via a bare `parseCron` whose plain `Error` fell through to the 500
+  branch; both now raise a `400 INVALID_CRON` via a shared `assertValidCron`.
+- **Changing an instance's cron takes effect immediately.** The scheduler's
+  next-fire timestamp was not invalidated when the cron expression changed,
+  so a backup/restart could fire once more on the old schedule before
+  picking up the new one. The shared `CronTicker` now drops the stale
+  next-fire when the expression changes.
+- **Backend stop/restart now reaps the executor subprocess.** A
+  `convex-local-backend` spawns a Node "executor" (`local.cjs`) to run
+  Node actions; that child did not exit when its parent received
+  SIGTERM, it was reparented to PID 1 and kept its (often multi-GB)
+  heap. Every operator stop, delete, force-restart, and the new
+  scheduled restart leaked it. `supervisor.stop` now captures the
+  backend's descendant PIDs before SIGTERM and SIGKILLs any survivors,
+  so a restart actually frees memory. Best-effort and Linux-only (walks
+  `/proc`); degrades to a no-op elsewhere.
 - **Pre-restore backup no longer dies at the convex CLI login prompt.**
   The container shipped Convex CLI `1.18.2`, which ignored the
   `CONVEX_SELF_HOSTED_URL` + `CONVEX_SELF_HOSTED_ADMIN_KEY` env vars
@@ -41,6 +59,22 @@ export` / `convex import` subprocess and the supervised
 
 ### Added
 
+- **Per-instance scheduled backend restart.** Self-hosted Convex never
+  releases the executor's V8/heap memory at runtime, so a long-lived
+  backend grows until it exhausts host memory. Each instance can now be
+  restarted on its own cron to reclaim it.
+  - New `restart_cron` + `restart_enabled` columns (migration 006),
+    nullable; opt-in per instance (default off).
+  - New `PUT /api/instances/:name/restart-config`
+    (`{ cron?, enabled? }`); `restartCron` / `restartEnabled` added to
+    the instance detail response.
+  - New _Scheduled restart_ panel in the instance's Backups · Settings
+    tab (cron field + enable toggle).
+  - `RESTART_SCHEDULER_ENABLED` (default on) master switch and
+    `RESTART_DEFAULT_CRON` (default `0 4 * * *`, after the backup
+    default) for the fallback schedule.
+  - A scheduled restart reuses the force-restart path (stop + respawn of
+    just that backend); other instances are untouched.
 - **Display name, distinct from the URL slug.** Instances now carry an
   optional `displayName` next to the immutable slug (formerly just
   `name`). The slug stays put because it backs the Convex

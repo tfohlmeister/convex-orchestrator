@@ -187,6 +187,8 @@ async function setupHarness(overrides: Partial<Config> = {}): Promise<Harness> {
     LOG_LEVEL: 'info',
     STORAGE_SAMPLE_INTERVAL_MS: 300_000,
     STORAGE_SCAN_PAGE_LIMIT: 100,
+    RESTART_SCHEDULER_ENABLED: true,
+    RESTART_DEFAULT_CRON: '0 4 * * *',
     BACKUP_SCHEDULER_ENABLED: true,
     BACKUP_DEFAULT_CRON: '0 3 * * *',
     BACKUP_RETENTION_DAYS: 30,
@@ -226,6 +228,8 @@ async function setupHarness(overrides: Partial<Config> = {}): Promise<Harness> {
     backupRetentionDays: null,
     backupEnabled: null,
     backupSuspended: false,
+    restartCron: null,
+    restartEnabled: null,
   };
   instances.insert(instance);
 

@@ -16,6 +16,7 @@ import {
 } from './db/repos.ts';
 import { BackupManager } from './backups/manager.ts';
 import { RestoreManager } from './backups/restore.ts';
+import { RestartManager } from './restarts/manager.ts';
 import { PortAllocator } from './ports.ts';
 import { PostgresStorage } from './storage/postgres.ts';
 import { MinioStorage } from './storage/minio.ts';
@@ -133,6 +134,15 @@ export async function bootstrap(): Promise<void> {
   });
   orchestrator.attachBackupManager(backupManager);
 
+  const restartManager = new RestartManager({
+    logger,
+    enabled: config.RESTART_SCHEDULER_ENABLED,
+    defaultCron: config.RESTART_DEFAULT_CRON,
+    listInstances: () => instances.list(),
+    restartBackend: (name) => orchestrator.scheduledRestart(name),
+  });
+  orchestrator.attachRestartManager(restartManager);
+
   const restoreManager = new RestoreManager({
     config,
     logger,
@@ -174,6 +184,7 @@ export async function bootstrap(): Promise<void> {
   supervisor.startBackgroundJobs();
   storageSampler.start();
   backupManager.start();
+  restartManager.start();
 
   const existing = instances.list();
   traefik.replaceAll(
@@ -289,6 +300,7 @@ export async function bootstrap(): Promise<void> {
     supervisor.stopBackgroundJobs();
     storageSampler.stop();
     backupManager.stop();
+    restartManager.stop();
     await supervisor.stopAllForShutdown();
     await server.stop();
     await postgres.close();

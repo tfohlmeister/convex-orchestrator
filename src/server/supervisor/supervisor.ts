@@ -2,6 +2,7 @@ import { spawnConvex, type SpawnHandle } from './spawn.ts';
 import { decideRestart, type BackoffState } from './watcher.ts';
 import { gracefulStop, stopAll } from './shutdown.ts';
 import { ResourceSampler, type ResourceSink } from './resources.ts';
+import { listDescendants, killAll } from './reap.ts';
 import type { Instance } from './types.ts';
 import type { Logger } from '../logger.ts';
 
@@ -34,6 +35,12 @@ export interface SupervisorDeps {
     status: 'running' | 'stopped' | 'error',
     lastError?: string,
   ) => void;
+  // Test override for descendant discovery + killing. Production wires the
+  // /proc-walking listDescendants and process.kill (see ./reap.ts); tests
+  // inject deterministic fakes so the reaping path is exercised without a
+  // real process tree.
+  listDescendants?: (pid: number) => Promise<number[]>;
+  killProcess?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 interface Tracked {
@@ -95,9 +102,37 @@ export class Supervisor {
     const t = this.tracked.get(name);
     if (!t) return;
     t.stopRequested = true;
+    // Capture the backend's descendant PIDs (chiefly the Node executor that
+    // runs Convex actions) BEFORE SIGTERM, while their ppid still points at
+    // the backend. The executor does not exit with its parent — it gets
+    // reparented to PID 1 and keeps its heap — so we SIGKILL the captured
+    // set afterwards to actually free the memory.
+    const descendants = await this.descendantsOf(t.handle.pid);
     await gracefulStop(t.handle.proc);
+    this.reap(name, descendants);
     this.tracked.delete(name);
     this.deps.onStatusChange(name, 'stopped');
+  }
+
+  private async descendantsOf(pid: number): Promise<number[]> {
+    const find = this.deps.listDescendants ?? listDescendants;
+    try {
+      return await find(pid);
+    } catch (err: unknown) {
+      this.deps.logger.warn(
+        { pid, err: err instanceof Error ? err.message : String(err) },
+        'descendant discovery failed; executor may leak',
+      );
+      return [];
+    }
+  }
+
+  private reap(name: string, descendants: number[]): void {
+    if (descendants.length === 0) return;
+    const killed = killAll(descendants, this.deps.killProcess);
+    if (killed.length > 0) {
+      this.deps.logger.info({ name, pids: killed }, 'reaped backend descendant processes');
+    }
   }
 
   async stopAllForShutdown(): Promise<void> {

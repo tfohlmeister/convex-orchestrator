@@ -24,6 +24,8 @@ function fakeInstance(name: string): Instance {
     backupRetentionDays: null,
     backupEnabled: null,
     backupSuspended: false,
+    restartCron: null,
+    restartEnabled: null,
   };
 }
 
