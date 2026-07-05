@@ -1,13 +1,104 @@
 # Changelog
 
-## Unreleased
+## 0.2.6 (2026-07-05)
+
+### Fixed
+
+- **The documented tuning env vars now actually reach the container.**
+  `docker compose` only uses `.env` for `${...}` interpolation inside the
+  compose file; it does not forward arbitrary keys into a service's
+  environment. The base compose file therefore silently ignored every
+  documented knob that wasn't listed in its `environment:` block. All
+  backup, restart, storage-sampler, and export-blob-cleanup tunables
+  (`BACKUP_*`, `RESTART_*`, `STORAGE_*`, `EXPORT_BLOB_*`, `LOG_LEVEL`)
+  are now passed through with their app defaults, so
+  `BACKUP_RETENTION_DAYS=14` in `.env` does what the docs always said.
+- **`TRAEFIK_CERT_RESOLVER` is settable from `.env`.** The base compose
+  file hard-coded `letsencrypt`, so co-hosted deploys whose existing
+  Traefik uses a different resolver name got routers pointing at a
+  nonexistent resolver. The default is unchanged; an explicitly empty
+  value writes `tls: {}` (serve Traefik's default certificate).
+
+### Added
+
+- **License compliance for the bundled Convex components.** The docker
+  image now ships the upstream FSL-1.1-Apache-2.0 license text at
+  `/convex/LICENSE.md`, and the repo gains `NOTICE` and
+  `THIRD_PARTY_LICENSES.md`. The README's License section spells out the
+  Apache-2.0 / FSL split and its practical consequence for users.
+
+### Docs
+
+- Corrected the co-hosted monitoring guidance (the UI port is bound to
+  loopback; probe from the host or widen the bind deliberately), the
+  upload-restore streaming description, the export-blob cleanup scope,
+  and several stale references (`dynamic.yml` vs `orchestrator.yml`,
+  supervisor backoff constants presented as env vars, sparkline endpoint
+  path, Bun version floor).
+- New README **Upgrading** section, including the 0.2.3 volume-chown
+  note.
+- Removed the unused `DASHBOARD_PASSWORD` from `.env.example`; added the
+  tunables and `TRAEFIK_CERT_RESOLVER` instead.
+- `CHANGELOG.md` restructured: the former "Unreleased" section is now
+  attributed to the releases (0.1.1-0.2.5) that actually shipped it.
+
+## 0.2.5 (2026-06-23)
+
+### Added
+
+- **Per-instance scheduled backend restart.** Self-hosted Convex never
+  releases the executor's V8/heap memory at runtime, so a long-lived
+  backend grows until it exhausts host memory. Each instance can now be
+  restarted on its own cron to reclaim it.
+  - New `restart_cron` + `restart_enabled` columns (migration 006),
+    nullable; opt-in per instance (default off).
+  - New `PUT /api/instances/:name/restart-config`
+    (`{ cron?, enabled? }`); `restartCron` / `restartEnabled` added to
+    the instance detail response.
+  - New _Scheduled restart_ panel in the instance's Backups · Settings
+    tab (cron field + enable toggle).
+  - `RESTART_SCHEDULER_ENABLED` (default on) master switch and
+    `RESTART_DEFAULT_CRON` (default `0 4 * * *`, after the backup
+    default) for the fallback schedule.
+  - A scheduled restart reuses the force-restart path (stop + respawn of
+    just that backend); other instances are untouched.
+
+### Fixed
+
+- **Backend stop/restart now reaps the executor subprocess.** A
+  `convex-local-backend` spawns a Node "executor" (`local.cjs`) to run
+  Node actions; that child did not exit when its parent received
+  SIGTERM, it was reparented to PID 1 and kept its (often multi-GB)
+  heap. Every operator stop, delete, force-restart, and the new
+  scheduled restart leaked it. `supervisor.stop` now captures the
+  backend's descendant PIDs before SIGTERM and SIGKILLs any survivors,
+  so a restart actually frees memory. Best-effort and Linux-only (walks
+  `/proc`); degrades to a no-op elsewhere.
+- **Invalid cron in the backup/restart config endpoints now returns 400,
+  not 500.** `PUT /backup-config` and `PUT /restart-config` validated the
+  cron via a bare `parseCron` whose plain `Error` fell through to the 500
+  branch; both now raise a `400 INVALID_CRON` via a shared `assertValidCron`.
+- **Changing an instance's cron takes effect immediately.** The scheduler's
+  next-fire timestamp was not invalidated when the cron expression changed,
+  so a backup/restart could fire once more on the old schedule before
+  picking up the new one. The shared `CronTicker` now drops the stale
+  next-fire when the expression changes.
+- **Co-hosted overlay no longer leaks docker-provider labels.** The base
+  file's `orchestrator` / `dashboard` router labels could collide with
+  same-named routers of an existing stack on the shared host; the overlay
+  now sets `traefik.enable: 'false'` (the UI is reached via the SSH
+  forward in this mode anyway).
+
+## 0.2.4 (2026-05-28)
+
+No functional changes (documentation formatting only).
+
+## 0.2.3 (2026-05-28)
 
 ### Security
 
-- **Orchestrator container now runs as non-root** (`USER bun`, uid 1000),
-  matching the host's `tf` user on the co-hosted deploy so the shared
-  Traefik dynamic-config dir bind-mount stays writable. The `convex
-export` / `convex import` subprocess and the supervised
+- **Orchestrator container now runs as non-root** (`USER bun`, uid 1000).
+  The `convex export` / `convex import` subprocess and the supervised
   `convex-local-backend` children inherit non-root. Removes the
   "RCE-to-root-in-container" path for any bug in the upload, restore,
   or spawn code.
@@ -29,26 +120,19 @@ export` / `convex import` subprocess and the supervised
   in depth against an accidental `logger.info({ instance })` or
   `logger.info({ config })` slip.
 
+## 0.2.2 (2026-05-28)
+
+### Changed
+
+- **The published image is `linux/amd64` only.** Multi-arch
+  (`linux/amd64,linux/arm64`) builds exhausted the CI runner's disk;
+  arm64 was dropped until the build is restructured. Build locally via
+  `docker-compose.dev.yml` on arm64 hosts.
+
+## 0.2.1 (2026-05-28)
+
 ### Fixed
 
-- **Invalid cron in the backup/restart config endpoints now returns 400,
-  not 500.** `PUT /backup-config` and `PUT /restart-config` validated the
-  cron via a bare `parseCron` whose plain `Error` fell through to the 500
-  branch; both now raise a `400 INVALID_CRON` via a shared `assertValidCron`.
-- **Changing an instance's cron takes effect immediately.** The scheduler's
-  next-fire timestamp was not invalidated when the cron expression changed,
-  so a backup/restart could fire once more on the old schedule before
-  picking up the new one. The shared `CronTicker` now drops the stale
-  next-fire when the expression changes.
-- **Backend stop/restart now reaps the executor subprocess.** A
-  `convex-local-backend` spawns a Node "executor" (`local.cjs`) to run
-  Node actions; that child did not exit when its parent received
-  SIGTERM, it was reparented to PID 1 and kept its (often multi-GB)
-  heap. Every operator stop, delete, force-restart, and the new
-  scheduled restart leaked it. `supervisor.stop` now captures the
-  backend's descendant PIDs before SIGTERM and SIGKILLs any survivors,
-  so a restart actually frees memory. Best-effort and Linux-only (walks
-  `/proc`); degrades to a no-op elsewhere.
 - **Pre-restore backup no longer dies at the convex CLI login prompt.**
   The container shipped Convex CLI `1.18.2`, which ignored the
   `CONVEX_SELF_HOSTED_URL` + `CONVEX_SELF_HOSTED_ADMIN_KEY` env vars
@@ -57,24 +141,10 @@ export` / `convex import` subprocess and the supervised
   scheduled and restore-from-upload pre-restore backup. Bumped to
   `1.36.1`, which honours the self-hosted env vars cleanly.
 
+## 0.2.0 (2026-05-28)
+
 ### Added
 
-- **Per-instance scheduled backend restart.** Self-hosted Convex never
-  releases the executor's V8/heap memory at runtime, so a long-lived
-  backend grows until it exhausts host memory. Each instance can now be
-  restarted on its own cron to reclaim it.
-  - New `restart_cron` + `restart_enabled` columns (migration 006),
-    nullable; opt-in per instance (default off).
-  - New `PUT /api/instances/:name/restart-config`
-    (`{ cron?, enabled? }`); `restartCron` / `restartEnabled` added to
-    the instance detail response.
-  - New _Scheduled restart_ panel in the instance's Backups · Settings
-    tab (cron field + enable toggle).
-  - `RESTART_SCHEDULER_ENABLED` (default on) master switch and
-    `RESTART_DEFAULT_CRON` (default `0 4 * * *`, after the backup
-    default) for the fallback schedule.
-  - A scheduled restart reuses the force-restart path (stop + respawn of
-    just that backend); other instances are untouched.
 - **Display name, distinct from the URL slug.** Instances now carry an
   optional `displayName` next to the immutable slug (formerly just
   `name`). The slug stays put because it backs the Convex
@@ -91,9 +161,8 @@ export` / `convex import` subprocess and the supervised
     edit pencil; the slug shows below in mono with a copy button.
   - The overview list sorts by slug (server-side) but renders the
     display name on top with the slug as a secondary line when set.
-- **Borg-offsite source dirs include orchestrator + postgres volumes**
-  (added in the Ansible playbook on 2026-05-28), MinIO excluded since
-  its backup zips are retention-bounded and re-creatable.
+
+## 0.1.1 (2026-05-28)
 
 ### Added
 
@@ -116,8 +185,8 @@ export` / `convex import` subprocess and the supervised
   of baseDomain. `dashboard.localhost` resolves to 127.0.0.1 in modern
   browsers (RFC 6761) and reuses the same tunnel; the server's host
   routing already accepts any `dashboard.*` host.
-- **Drop the leftover internal-project placeholder** in the create
-  dialog (`masterev-dev`). Now `lucky-otter-123`.
+- **Placeholder instance name in the create dialog** replaced with a
+  neutral example (`lucky-otter-123`).
 
 ## 0.1.0 (2026-05-28), initial version
 
@@ -135,7 +204,7 @@ instance.
   10-minute window). Operator-initiated `stop` cancels any pending
   respawn so the backend doesn't race back up after the stop returns.
 - **Subdomain routing via Traefik file provider.** The orchestrator
-  writes `dynamic.yml` atomically (temp + rename) so
+  writes its dynamic-config file atomically (temp + rename) so
   `providers.file.watch=true` never observes a partial file. Per-
   instance cloud + site routers are added and removed in place. No
   Traefik restart, no docker socket.
@@ -185,7 +254,7 @@ instance.
 - **Resource sampling.** Per-instance CPU, RSS, and per-bucket storage
   size, sampled by the orchestrator and surfaced as sparklines on the
   overview and time-series charts on the detail page. Sparkline
-  endpoint is dedicated (`/api/instances/:name/samples?metric=…`) to
+  endpoint is dedicated (`/api/instances/:name/sparkline`) to
   avoid an N+1 on the list view.
 - **Health endpoints (unauthenticated).** `GET /health` is a simple
   liveness probe used by the Docker `HEALTHCHECK`; `GET /ready` returns

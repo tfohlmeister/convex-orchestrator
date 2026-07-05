@@ -16,7 +16,7 @@ One Hono process inside one container does five things:
   `ORCHESTRATOR_MASTER_KEY` via HKDF-SHA256 (see `src/server/crypto.ts`).
 - **Supervises one `convex-backend` child process per instance** via `src/server/supervisor/`,
   with restart backoff, resource sampling, and graceful shutdown.
-- **Writes the Traefik file-provider config** (`dynamic.yml`) atomically (temp + rename) so
+- **Writes the Traefik file-provider config** (`orchestrator.yml`, path from `TRAEFIK_DYNAMIC_PATH`) atomically (temp + rename) so
   `providers.file.watch=true` never sees a partial file. Per-instance cloud and site routers are
   added or removed in place, no Traefik restart.
 - **Talks to Postgres and MinIO** for shared storage. Each backend's `convex-backend` is launched
@@ -66,8 +66,11 @@ The backup manager (`src/server/backups/manager.ts`) runs four background ticks:
   `source=auto` rows older than the per-instance `backup_retention_days` (falls back to
   `BACKUP_RETENTION_DAYS`). `manual`, `manual-upload`, and `pre-restore` rows are kept until the
   operator deletes them.
-- **Export-blob orphan cleanup**, hourly. Walks the local `BACKUP_WORK_DIR` and removes
-  `restore_*.zip` and `*.blob` files older than `EXPORT_BLOB_CLEANUP_MIN_AGE_MS`.
+- **Export-blob orphan cleanup**, hourly. Walks each running instance's
+  `<storage-dir>/exports/` (from `CONVEX_STORAGE_DIR_TEMPLATE`) and removes `*.blob` files older
+  than `EXPORT_BLOB_CLEANUP_MIN_AGE_MS`. Staged `restore_*.zip` files in `BACKUP_WORK_DIR` are
+  only cleaned up inline by the restore flow itself; leftovers from a crash mid-restore are not
+  swept and may need a manual delete.
 
 The export-and-upload path itself is sequential per instance and bounded by
 `BACKUP_MAX_CONCURRENT` (default 2) across the fleet, Convex's export is backend-CPU-heavy and
@@ -94,8 +97,8 @@ to retry or roll forward.
 
 ## Storage layout
 
-- **Postgres** (shared): one cluster, one shared multitenant database (`POSTGRES_SHARED_DB`,
-  default `convex_tenants`). Backends run with `-d postgres-v5-multitenant` and pass their
+- **Postgres** (shared): one cluster, one shared multitenant database (`POSTGRES_SHARED_DB`;
+  the code default is `convex`, the compose files set `convex_tenants`). Backends run with `-d postgres-v5-multitenant` and pass their
   instance name + secret; rows carry an `instance_name` discriminator column inside the shared
   tables. Per-tenant purge on delete is a Phase 2 problem; for now tenant rows linger after
   `DELETE` (see `Orchestrator.delete` in `src/server/orchestrator.ts`).
@@ -173,17 +176,18 @@ problem; for now `DELETE` leaves tenant rows behind in the shared tables (see
 `run_backend.sh` in the official image is the real contract: `POSTGRES_URL` (positional `DB_SPEC`
 inside the script), `CONVEX_CLOUD_ORIGIN` / `CONVEX_SITE_ORIGIN` (not `*_URL`),
 `S3_STORAGE_{EXPORTS,SNAPSHOT_IMPORTS,MODULES,FILES,SEARCH}_BUCKET` (five env vars, full bucket
-names, no flag prefix), `AWS_*` for S3 creds, `INSTANCE_NAME` / `INSTANCE_SECRET` for the multi-
-tenant identity, `DO_NOT_REQUIRE_SSL` for plain Postgres, `DISABLE_BEACON` for telemetry. Only
-`-p`, `--site-proxy-port`, `-i`, `-d`, and `--s3-storage` are CLI flags. See the comment block in
-`src/server/supervisor/spawn.ts` for the canonical invocation.
+names, no flag prefix), `AWS_*` for S3 creds, `DISABLE_BEACON` for telemetry. The exceptions are
+CLI flags: `-p`, `--site-proxy-port`, `-i`, `-d`, `--s3-storage`, plus `--instance-name`,
+`--instance-secret`, and `--do-not-require-ssl` (env vars are not enough for the multitenant
+identity, see the previous paragraph). See `src/server/supervisor/spawn.ts` for the canonical
+invocation.
 
 **`generate_key` is built from source, not pulled from a release.** The release zip contains only
-`convex-local-backend`. The `generate_key` source (FSL-1.1-Apache-2.0, local build explicitly
-permitted) is a 60-line clap wrapper around `KeyBroker::issue_admin_key`. The Dockerfile builds
+`convex-local-backend`. The `generate_key` source (FSL-1.1-Apache-2.0, covered by the license copy the image ships
+at `/convex/LICENSE.md`, see `NOTICE`) is a 60-line clap wrapper around `KeyBroker::issue_admin_key`. The Dockerfile builds
 it from the same git tag pinned by `CONVEX_VERSION` so the binary cannot drift from the backend.
 A key generated this way is accepted by the running backend with HTTP 200, verified end-to-end
-against the NAS deployment on 2026-05-26.
+against a real deployment.
 
 **The dashboard switcher is replaced by orchestrator-driven postMessage credentials.** Convex's
 official dashboard image expects `NEXT_PUBLIC_DEFAULT_LIST_DEPLOYMENTS_API_PORT` and fetches

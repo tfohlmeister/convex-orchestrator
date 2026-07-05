@@ -102,6 +102,10 @@ RUN git clone --depth 1 --branch "${CONVEX_VERSION}" \
       https://github.com/get-convex/convex-backend.git .
 RUN cargo build --release -p keybroker --bin generate_key \
     && install -m 0755 target/release/generate_key /generate_key
+# FSL requires redistributions to include a copy of the license terms.
+# One copy covers all three bundled artifacts (backend binary,
+# generate_key, dashboard export) since they come from the same tag.
+RUN install -m 0644 LICENSE.md /convex-backend-LICENSE.md
 
 # ---------- Stage 5: runtime ----------
 FROM oven/bun:1.3-slim AS runtime
@@ -132,6 +136,10 @@ WORKDIR /app
 # local backend + generate_key wrappers without sudo.
 COPY --from=convex-backend-bin --chown=bun:bun /out/convex-local-backend /convex/convex-local-backend
 COPY --from=convex-genkey --chown=bun:bun /generate_key /convex/generate_key
+# License terms for the FSL-licensed Convex components bundled in this image
+# (backend binary, generate_key, dashboard static export). See NOTICE in the
+# repo root.
+COPY --from=convex-genkey --chown=bun:bun /convex-backend-LICENSE.md /convex/LICENSE.md
 COPY --from=server-build --chown=bun:bun /app/dist/server ./dist/server
 COPY --from=web-build --chown=bun:bun /app/dist/web ./dist/web
 COPY --from=convex-dashboard --chown=bun:bun /out ./dist/dashboard

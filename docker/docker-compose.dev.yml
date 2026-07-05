@@ -21,10 +21,10 @@
 services:
   orchestrator:
     # Build locally from the working tree instead of pulling from GHCR.
-    # The dev overlay is the contributor / NAS path; the base compose
-    # file points at the published image. `network: host` is needed on
-    # some hosts (e.g. the NAS) where buildkit's default bridge network
-    # silently drops apt's package-list fetch from deb.debian.org.
+    # The dev overlay is the contributor path; the base compose file
+    # points at the published image. `network: host` is needed on some
+    # hosts where buildkit's default bridge network silently drops apt's
+    # package-list fetch from deb.debian.org.
     build:
       context: ..
       dockerfile: docker/Dockerfile

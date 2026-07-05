@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the multi-arch image and publishes it to GHCR whenever a tag
+# Builds the linux/amd64 image and publishes it to GHCR whenever a tag
 # matching `v*` is pushed. Tags are produced by:
 #
 #   git tag v0.1.0 && git push origin v0.1.0
@@ -53,6 +53,11 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
+          # The image bundles FSL-licensed Convex components on top of the
+          # repo's Apache-2.0 code; the auto-derived repo license alone
+          # would misstate the image contents. See NOTICE.
+          labels: |
+            org.opencontainers.image.licenses=Apache-2.0 AND FSL-1.1-Apache-2.0
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}

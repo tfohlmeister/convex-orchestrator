@@ -1,0 +1,24 @@
+convex-orchestrator
+Copyright 2026 Thorben Fohlmeister
+
+This product's source code is licensed under the Apache License,
+Version 2.0 (see LICENSE).
+
+The published Docker image additionally bundles components of Convex
+(https://github.com/get-convex/convex-backend),
+Copyright Convex, Inc., licensed under the Functional Source License,
+Version 1.1, with Apache 2.0 Future License (FSL-1.1-Apache-2.0):
+
+  - the `convex-local-backend` binary (from the official release),
+  - the `generate_key` binary (built from the same release tag),
+  - the Convex dashboard static export (from the same release).
+
+A copy of the FSL-1.1-Apache-2.0 terms ships in the image at
+/convex/LICENSE.md. Under the FSL's Grant of Future License, each
+bundled Convex release converts to Apache-2.0 two years after that
+release was made available.
+
+This project is not affiliated with or endorsed by Convex, Inc.
+
+The image and the web UI also bundle third-party JavaScript packages;
+see THIRD_PARTY_LICENSES.md for the list and their licenses.

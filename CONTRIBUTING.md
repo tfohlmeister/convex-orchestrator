@@ -11,7 +11,7 @@ this file.
 
 You need:
 
-- **Bun** ≥ 1.3 (the orchestrator is a Bun process)
+- **Bun** ≥ 1.1 (the orchestrator is a Bun process; CI runs the latest 1.x)
 - **Docker** with `docker compose` (for the postgres + minio + traefik
   dependencies, and for a full end-to-end run of the supervised
   `convex-backend` children)
@@ -67,9 +67,12 @@ Three layers, all under `bun test`:
 - **Supervisor / orchestrator integration tests** exercise the lifecycle
   state machine with stubbed `Bun.spawn`. The DI seams are
   `SupervisorDeps` and `OrchestratorDeps`.
-- **Backup / restore integration tests** spin up postgres, minio, and a
-  real convex-backend per test where needed; they are gated on CI to
-  the `integration` job.
+- **Backup / restore integration tests** (`src/server/backups/integration.test.ts`)
+  drive the backup manager against an in-memory MinIO fake and a mock
+  `convex` CLI script; they run under plain `bun test` like everything
+  else. CI's separate `integration` job builds the image and
+  smoke-tests `/health` against it (plain `docker run` with postgres +
+  minio siblings).
 
 When you change behavior, update or add the matching test before sending
 the PR. The fleet code review enforces "feature shipped without test"

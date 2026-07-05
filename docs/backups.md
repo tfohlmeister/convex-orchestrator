@@ -32,8 +32,8 @@ the flag for that reason; do not roll your own export pipeline that omits it.
 - **Schema, functions, crons, auth config**, redeploy with `npx convex deploy`
 
 The orchestrator's restore-confirm dialog surfaces this explicitly so a user who, say, expects an
-env var change to roll back along with a restore is not surprised. Tested end-to-end against the
-NAS deployment on 2026-05-27.
+env var change to roll back along with a restore is not surprised. Tested end-to-end against a
+real deployment.
 
 ## Storage layout
 
@@ -96,7 +96,7 @@ before the import step aborts the restore with the original data intact.
 Two paths, both end in the same `convex import --replace-all --include-file-storage` call:
 
 1. **From the backup list**, pick a row, click `Restore`, type the instance name to confirm.
-2. **From upload**, `Restore from upload…`, pick a `.zip`, type the instance name to confirm. The file is streamed straight to MinIO (no in-RAM buffering) and registered as a `manual-upload` backup row.
+2. **From upload**, `Restore from upload…`, pick a `.zip`, type the instance name to confirm. The file is streamed to a staging file in `BACKUP_WORK_DIR` (no in-RAM buffering), then uploaded to MinIO and registered as a `manual-upload` backup row.
 
 Before the destructive import runs, the orchestrator takes a `pre-restore` backup. If the
 pre-restore step fails the whole restore is aborted with a 500, no data is touched. Convex's

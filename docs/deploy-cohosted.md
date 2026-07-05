@@ -45,7 +45,7 @@ Wildcard A record pointing at the shared host:
 
 The orchestrator emits per-instance routers for
 `<instance>.<base-domain>` and `<instance>-site.<base-domain>` into the
-shared Traefik's dynamic dir; the wildcard takes care of all three. HTTP-01
+shared Traefik's dynamic dir; the wildcard takes care of both. HTTP-01
 ACME works out of the box since the host's Traefik already terminates
 `:80` and `:443`. No DNS-API credentials needed.
 
@@ -129,11 +129,12 @@ open) is enough to make `http://localhost:18000` work in your browser.
 The orchestrator UI is not publicly routed, so external monitoring
 should target two layers separately:
 
-1. **Orchestrator liveness** at `http://<host-private-ip>:18000/health`,
-   where `<host-private-ip>` is whatever interface your monitoring
-   service can reach (VPN, Tailscale, internal network). Use the host's
-   private IP, not `127.0.0.1`, because the monitoring service is not
-   on the host.
+1. **Orchestrator liveness** at `http://127.0.0.1:<ORCHESTRATOR_UI_BIND_PORT>/health`.
+   The overlay binds this port to loopback only, so the check has to run
+   on the host itself (a local monitoring agent, or a remote checker
+   that probes over an SSH forward). If your monitoring lives elsewhere
+   and you accept the exposure, widen the bind in a compose override,
+   e.g. `'<private-ip>:18000:8080'` on a VPN/Tailscale interface.
 2. **Per-instance end-to-end** at `https://<instance>.<base-domain>/version`.
    This exercises DNS, TLS termination, the shared Traefik router, and
    the backend process. A green check here means a real Convex client

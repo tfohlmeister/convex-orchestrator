@@ -10,11 +10,11 @@ from one editorial web UI with the official Convex dashboard embedded per-instan
 ## Features
 
 - **One container, N supervised backends**: each Convex deployment runs as a child process under a
-  Bun-based supervisor with a backoff-aware restart watcher (`RESTART_DELAYS_MS`, `MAX_RESTARTS` in
-  a 10-minute window) and per-instance resource sampling.
-- **Subdomain routing via Traefik file provider**: the orchestrator atomically writes
-  `dynamic.yml` so per-instance `cloud` and `site` hosts are added or removed without restarting
-  Traefik. No docker socket needed.
+  Bun-based supervisor with a backoff-aware restart watcher (fixed 1 s → 60 s delays, capped
+  restarts per 10-minute window) and per-instance resource sampling.
+- **Subdomain routing via Traefik file provider**: the orchestrator atomically writes its
+  dynamic-config file (`orchestrator.yml`) so per-instance `cloud` and `site` hosts are added or
+  removed without restarting Traefik. No docker socket needed.
 - **One Convex dashboard for the whole fleet**: the bundled dashboard static export is served from
   the same Hono process via host-header routing; credentials are handed to the iframe over
   `postMessage` so the operator never logs in per instance.
@@ -37,7 +37,7 @@ from one editorial web UI with the official Convex dashboard embedded per-instan
 ![Architecture overview](./docs/diagrams/architecture.svg)
 
 The orchestrator is one Hono process that supervises N `convex-backend` child processes inside a
-single container, writes a Traefik file-provider `dynamic.yml` for per-instance host routing, and
+single container, writes a Traefik file-provider config for per-instance host routing, and
 serves both its own React UI and the bundled Convex dashboard from the same port. Backends share a
 Postgres cluster in `postgres-v5-multitenant` mode and a MinIO bucket layout with per-instance
 prefixes. The bundled dashboard receives credentials via `postMessage` from the orchestrator UI,
@@ -65,8 +65,19 @@ Open `https://orchestrator.<BASE_DOMAIN>` and create your first instance. Click 
 any row to land in the official Convex dashboard, embedded and auto-authenticated for that
 instance.
 
-Pin a specific release for repeatable deploys by setting `ORCHESTRATOR_VERSION=0.1.0` in `.env`;
+Pin a specific release for repeatable deploys by setting `ORCHESTRATOR_VERSION=0.2.6` in `.env`;
 unset means `latest`.
+
+### Upgrading
+
+`docker compose pull && docker compose up -d` moves you to the newest release when
+`ORCHESTRATOR_VERSION` is unset. Skim the [CHANGELOG](./CHANGELOG.md) before upgrading across
+minor versions. One upgrade needs manual action:
+
+- **0.2.2 and older → 0.2.3+**: the container now runs as a non-root user. Volumes created by
+  older versions are root-owned, and the orchestrator fails on boot with
+  `SQLITE_READONLY_DIRECTORY`. Fix once with the `chown` documented in the
+  [0.2.3 changelog entry](./CHANGELOG.md).
 
 ### Dev / homelab variant (HTTP, no Let's Encrypt)
 
@@ -163,8 +174,9 @@ are untouched.
 ![Instance lifecycle](./docs/diagrams/instance-lifecycle.svg)
 
 A backend can be `creating`, `running`, `stopped`, or `error`. The supervisor restarts a crashed
-process per `RESTART_DELAYS_MS` (1s, 5s, 30s, 60s, ...) up to `MAX_RESTARTS` within a 10-minute
-window; past the budget the row flips to `error` with the last exit code in `last_error`. A
+process with a fixed backoff (1 s, 5 s, 30 s, 60 s, ...) up to a restart budget within a
+10-minute window; past the budget the row flips to `error` with the last exit code in
+`last_error`. A
 user-initiated `stop` during the backoff window cancels the pending respawn (otherwise the
 setTimeout would silently bring the backend back up after the operator told it to stop). Delete
 requires typing the instance name as confirmation, same UX as Restore.
@@ -201,9 +213,23 @@ See [`docs/architecture.md`](docs/architecture.md) for the full payload shape an
 
 The Dockerfile pulls the Convex backend binary from the official
 `get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key`
-from the same git tag (FSL-1.1-Apache-2.0 permits local builds), and bundles the dashboard static
-export. No separate dashboard container needed.
+from the same git tag, and bundles the dashboard static export. No separate dashboard container
+needed. See the License section below for what that bundling means.
 
 ## License
 
-Apache License 2.0. See [LICENSE](./LICENSE).
+The code in this repository is licensed under the **Apache License 2.0** (see
+[LICENSE](./LICENSE)).
+
+The published **Docker image** additionally bundles components of Convex (the
+`convex-local-backend` binary, the `generate_key` binary, and the dashboard static export),
+Copyright Convex, Inc., licensed under the
+[Functional Source License, FSL-1.1-Apache-2.0](https://github.com/get-convex/convex-backend/blob/main/LICENSE.md).
+A copy of those terms ships in the image at `/convex/LICENSE.md`. The practical consequence:
+running the image to host backends for **your own applications is a Permitted Purpose**; using it
+to offer a **commercial hosted-Convex service to third parties would be a Competing Use** and is
+not licensed by Convex's FSL. Each bundled Convex release converts to Apache-2.0 two years after
+its release date. Details in [NOTICE](./NOTICE) and
+[THIRD_PARTY_LICENSES.md](./THIRD_PARTY_LICENSES.md).
+
+This project is not affiliated with or endorsed by Convex, Inc.
