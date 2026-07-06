@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.7 (2026-07-06)
+
+### Fixed
+
+- **Fresh installs of the bundled-Traefik stack no longer crash-loop on
+  boot.** Since 0.2.3 the orchestrator runs as a non-root user (uid 1000),
+  but Docker creates the shared `traefik-dynamic` named volume root-owned
+  on a first `up`. The orchestrator could not write its router files
+  (`self.yml` / `orchestrator.yml`) into it, crash-looped on `EACCES`, and
+  Traefik served `404` for every host. A one-shot `init-traefik-perms`
+  container now chowns the volume to the orchestrator's uid before it
+  starts; the chown is idempotent, so an existing root-owned volume is
+  repaired on the next `up`. The co-hosted overlay bind-mounts an
+  already-writable host dir and skips the init step. This only affected the
+  base `docker-compose.yml` path (the documented "Try it" quickstart);
+  production co-hosted deploys were never impacted. Image contents are
+  unchanged from 0.2.6 (the fix lives entirely in the compose files).
+
 ## 0.2.6 (2026-07-05)
 
 ### Fixed

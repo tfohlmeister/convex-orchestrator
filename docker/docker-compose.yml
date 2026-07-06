@@ -69,6 +69,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      init-traefik-perms:
+        condition: service_completed_successfully
     healthcheck:
       test: ['CMD', 'curl', '--fail', '--silent', 'http://127.0.0.1:8080/health']
       interval: 15s
@@ -122,6 +124,26 @@ services:
       interval: 15s
       timeout: 3s
       start_period: 10s
+
+  # One-shot ownership fixup for the shared Traefik dynamic-config volume.
+  # The orchestrator runs as non-root (uid 1000) since 0.2.3, but Docker
+  # creates the named `traefik-dynamic` volume root-owned on a fresh install.
+  # Without this, the orchestrator cannot write its router files
+  # (self.yml / orchestrator.yml) into the volume and crash-loops on
+  # EACCES; Traefik then has no routes and every host returns 404. This
+  # container chowns the volume to the orchestrator's uid, then exits; the
+  # orchestrator waits for it via `service_completed_successfully`. The
+  # chown is idempotent, so it also repairs volumes from pre-fix installs
+  # on the next `up`. Reuses the postgres image (already pulled) to avoid
+  # an extra download. Not needed in the co-hosted overlay, which bind-mounts
+  # an already-writable host dir instead (see docker-compose.cohosted.yml).
+  init-traefik-perms:
+    image: postgres:16
+    container_name: orchestrator-init-traefik-perms
+    entrypoint: ['chown', '-R', '1000:1000', '/etc/traefik/dynamic']
+    restart: 'no'
+    volumes:
+      - traefik-dynamic:/etc/traefik/dynamic
 
   traefik:
     image: traefik:v3.5

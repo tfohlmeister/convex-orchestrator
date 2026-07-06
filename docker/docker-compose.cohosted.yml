@@ -30,6 +30,17 @@ services:
   orchestrator:
     environment:
       TRAEFIK_SELF_ROUTES_ENABLED: 'false'
+    # The base file makes the orchestrator wait on `init-traefik-perms`,
+    # which chowns the bundled Traefik's named volume. In cohosted mode the
+    # dynamic dir is an already-writable host bind (below), so that init
+    # container is irrelevant. !override replaces the whole depends_on
+    # (compose deep-merges maps otherwise) so the init dependency is dropped
+    # while the postgres/minio health waits are kept.
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     # The base file labels expose `orchestrator` and `dashboard` routers via
     # the docker provider. In cohosted mode those names can collide with
     # an existing stack on the same host (a user's own `dashboard` router,
