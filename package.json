@@ -1,6 +1,6 @@
 {
   "name": "convex-orchestrator",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "private": true,
   "description": "Run multiple self-hosted Convex backend instances on a single host.",
   "license": "Apache-2.0",

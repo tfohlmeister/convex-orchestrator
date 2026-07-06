@@ -65,7 +65,7 @@ Open `https://orchestrator.<BASE_DOMAIN>` and create your first instance. Click 
 any row to land in the official Convex dashboard, embedded and auto-authenticated for that
 instance.
 
-Pin a specific release for repeatable deploys by setting `ORCHESTRATOR_VERSION=0.2.6` in `.env`;
+Pin a specific release for repeatable deploys by setting `ORCHESTRATOR_VERSION=0.2.7` in `.env`;
 unset means `latest`.
 
 ### Upgrading
