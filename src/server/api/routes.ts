@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
+import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
 import type { Orchestrator } from '../orchestrator.ts';
 import type { Config } from '../config.ts';
 import type { AuditRepo, BackupRepo, ResourceSampleRepo, StorageSampleRepo } from '../db/repos.ts';
@@ -433,7 +434,15 @@ export function buildRoutes(deps: RouteDeps): Hono {
       const tmpStream = createWriteStream(tmpPath);
       const counter = byteCountingTransform(cap);
       try {
-        await pipeline(body as unknown as ReadableStream<Uint8Array>, counter, tmpStream);
+        // Readable.fromWeb, not the web stream directly: bun's pipeline()
+        // falls back to async iteration on a raw web stream and dies with
+        // "undefined is not a function" (bun 1.3.14, verified against the
+        // real upload route).
+        await pipeline(
+          Readable.fromWeb(body as unknown as NodeWebReadableStream<Uint8Array>),
+          counter,
+          tmpStream,
+        );
         const jobId = await deps.restoreManager.startRestoreFromUpload(name, tmpPath, actorOf(c));
         return c.json({ jobId }, 202);
       } catch (err) {
