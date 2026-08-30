@@ -32,8 +32,8 @@ export function DeleteConfirmDialog({ open, name, onClose, onDeleted }: Props) {
           Delete {name}
         </h2>
         <p className="text-[13px] text-[var(--color-muted)] mb-4 leading-relaxed">
-          This drops the Postgres schema, deletes all MinIO buckets for this instance, removes
-          Traefik routes, and kills the backend process.{' '}
+          This drops the Postgres database belonging to this instance, deletes all its MinIO
+          buckets, removes Traefik routes, and kills the backend process.{' '}
           <strong className="text-[var(--color-danger)]">Irreversible.</strong>
         </p>
         <div className="text-[12px] text-[var(--color-warn)] mb-5 bg-[var(--color-warn-tint)] border border-[color:rgba(180,83,9,0.25)] rounded-lg px-3 py-2.5 leading-relaxed">

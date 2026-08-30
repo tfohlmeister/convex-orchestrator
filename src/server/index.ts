@@ -69,9 +69,25 @@ export async function bootstrap(): Promise<void> {
 
   const postgres = new PostgresStorage({
     adminConnectionString: config.POSTGRES_ADMIN_URL,
-    sharedDatabase: config.POSTGRES_SHARED_DB,
   });
-  await postgres.ensureSharedDatabaseExists();
+  postgres.onPoolError = (err) => logger.error({ err: err.message }, 'postgres admin pool error');
+  // Boot-time reachability check: a wrong admin URL or password should fail
+  // here, not on the first create days later.
+  let canCreateDatabases: boolean;
+  try {
+    ({ canCreateDatabases } = await postgres.checkAdminAccess());
+  } catch (err: unknown) {
+    logger.fatal(
+      { err: err instanceof Error ? err.message : String(err) },
+      'cannot reach Postgres with POSTGRES_ADMIN_URL; check host, credentials and that the cluster is up',
+    );
+    process.exit(1);
+  }
+  if (!canCreateDatabases) {
+    logger.warn(
+      'the POSTGRES_ADMIN_URL role cannot create databases. Existing instances keep running, but creating one will fail.',
+    );
+  }
   const minio = new MinioStorage({
     endpoint: config.S3_ENDPOINT,
     region: config.S3_REGION,
@@ -91,7 +107,7 @@ export async function bootstrap(): Promise<void> {
     binaryPath: config.CONVEX_BINARY,
     logDir: config.LOG_DIR,
     logger,
-    databaseUrl: () => postgres.databaseUrlForInstance(config.POSTGRES_CLUSTER_URL),
+    databaseUrl: () => postgres.clusterUrl(config.POSTGRES_CLUSTER_URL),
     s3: {
       endpoint: config.S3_ENDPOINT,
       accessKey: config.S3_ACCESS_KEY,

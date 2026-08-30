@@ -8,7 +8,11 @@ import type { BackupManager } from './backups/manager.ts';
 import type { Config } from './config.ts';
 import type { Logger } from './logger.ts';
 import type { MinioStorage } from './storage/minio.ts';
-import type { PostgresStorage } from './storage/postgres.ts';
+import {
+  DatabaseExistsError,
+  DatabaseMissingError,
+  type PostgresStorage,
+} from './storage/postgres.ts';
 import type { Supervisor } from './supervisor/supervisor.ts';
 import type { Instance } from './supervisor/types.ts';
 import type { TraefikWriter } from './traefik/writer.ts';
@@ -33,16 +37,19 @@ function silentLogger(): Logger {
 interface FakeMinio {
   buckets: { created: string[]; deleted: string[] };
   failBucketDelete: boolean;
+  createThrows: boolean;
 }
 
 function fakeMinio(): { obj: MinioStorage; state: FakeMinio } {
   const state: FakeMinio = {
     buckets: { created: [], deleted: [] },
     failBucketDelete: false,
+    createThrows: false,
   };
   const obj = {
     bucketPrefix: (n: string) => n,
     createBucketsForInstance: async (prefix: string) => {
+      if (state.createThrows) throw new Error('minio offline');
       state.buckets.created.push(prefix);
     },
     deleteBucketsForInstance: async (prefix: string) => {
@@ -119,9 +126,36 @@ function fakeBackupManager(): { obj: BackupManager; state: FakeBackupManager } {
   return { obj, state };
 }
 
-const fakePostgres = {
-  sharedDatabaseName: () => 'convex',
-} as unknown as PostgresStorage;
+interface FakePostgres {
+  created: string[];
+  asserted: string[];
+  dropped: string[];
+  existing: Set<string>;
+}
+
+function makePostgres() {
+  const state: FakePostgres = { created: [], asserted: [], dropped: [], existing: new Set() };
+  const obj = {
+    createDatabaseForInstance: (name: string) => {
+      if (state.existing.has(name)) return Promise.reject(new DatabaseExistsError(name));
+      state.created.push(name);
+      state.existing.add(name);
+      return Promise.resolve(name.replace(/-/g, '_'));
+    },
+    assertDatabaseForInstance: (name: string) => {
+      state.asserted.push(name);
+      return state.existing.has(name)
+        ? Promise.resolve()
+        : Promise.reject(new DatabaseMissingError(name));
+    },
+    dropDatabaseForInstance: (name: string) => {
+      state.dropped.push(name);
+      state.existing.delete(name);
+      return Promise.resolve();
+    },
+  } as unknown as PostgresStorage;
+  return { obj, state };
+}
 
 // -------------------------- harness --------------------------
 
@@ -136,6 +170,7 @@ interface Harness {
   supervisor: FakeSupervisor;
   traefik: FakeTraefik;
   backupManager: FakeBackupManager;
+  postgres: FakePostgres;
 }
 
 async function setup(): Promise<Harness> {
@@ -149,12 +184,13 @@ async function setup(): Promise<Harness> {
   const supervisorWrap = fakeSupervisor();
   const traefikWrap = fakeTraefik();
   const bmWrap = fakeBackupManager();
+  const postgresWrap = makePostgres();
 
   const config = {
     BASE_DOMAIN: 'cvx.lan',
     EXTERNAL_SCHEME: 'http',
     EXTERNAL_PORT_SUFFIX: '',
-    GENERATE_KEY_BINARY: '/dev/null',
+    CONVEX_BINARY: '/dev/null',
   } as unknown as Config;
 
   const deps: OrchestratorDeps = {
@@ -164,12 +200,12 @@ async function setup(): Promise<Harness> {
     audit,
     samples: new ResourceSampleRepo(db),
     ports,
-    postgres: fakePostgres,
+    postgres: postgresWrap.obj,
     minio: minioWrap.obj,
     supervisor: supervisorWrap.obj,
     traefik: traefikWrap.obj,
     backupManager: bmWrap.obj,
-    // Deterministic stub so we never spawn the real generate_key binary.
+    // Deterministic stub so we never spawn the real backend binary.
     generateAdminKey: async (_tools, name, secret) => `${name}|fake-key-${secret.slice(0, 8)}`,
   };
   const orchestrator = new Orchestrator(deps);
@@ -192,6 +228,7 @@ async function setup(): Promise<Harness> {
     supervisor: supervisorWrap.state,
     traefik: traefikWrap.state,
     backupManager: bmWrap.state,
+    postgres: postgresWrap.state,
   };
 }
 
@@ -213,6 +250,8 @@ describe('Orchestrator.create', () => {
     expect(inst.name).toBe('foo');
     expect(inst.adminKey).toMatch(/^foo\|fake-key-/);
     expect(h.minio.buckets.created).toEqual(['foo']);
+    expect(inst.postgresDatabase).toBe('foo');
+    expect(h.postgres.created).toEqual(['foo']);
     expect(h.supervisor.starts).toEqual(['foo']);
     expect(h.traefik.routes.has('foo')).toBe(true);
     expect(h.traefik.commits).toBeGreaterThanOrEqual(1);
@@ -230,6 +269,39 @@ describe('Orchestrator.create', () => {
       caught = e;
     }
     expect(caught).toMatchObject({ status: 409, code: 'ALREADY_EXISTS' });
+  });
+
+  test('refuses a name whose database is already on the cluster instead of adopting it', async () => {
+    h.postgres.existing.add('convex');
+    let caught: unknown;
+    try {
+      await h.orchestrator.create('convex', 'tester');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toMatchObject({ status: 409, code: 'DATABASE_EXISTS' });
+    expect(h.instances.get('convex')).toBeNull();
+    expect(h.minio.buckets.created).toEqual([]);
+  });
+
+  test('a failure after the database is created rolls it back so the name stays usable', async () => {
+    h.minio.createThrows = true;
+    let caught: unknown;
+    try {
+      await h.orchestrator.create('foo', 'tester');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(h.postgres.created).toEqual(['foo']);
+    expect(h.postgres.dropped).toEqual(['foo']);
+    expect(h.postgres.existing.has('foo')).toBe(false);
+    expect(h.instances.get('foo')).toBeNull();
+
+    // and the retry succeeds instead of hitting a 409 for a stale database
+    h.minio.createThrows = false;
+    const inst = await h.orchestrator.create('foo', 'tester');
+    expect(inst.status).toBe('running');
   });
 
   test('rollback: if spawnAndRoute throws, the row exists but status flips to error with message', async () => {
@@ -257,6 +329,7 @@ describe('Orchestrator.delete', () => {
     expect(h.traefik.routes.has('foo')).toBe(false);
     expect(h.traefik.commits).toBeGreaterThan(commitsBefore);
     expect(h.minio.buckets.deleted).toEqual(['foo']);
+    expect(h.postgres.dropped).toEqual(['foo']);
     expect(h.instances.get('foo')).toBeNull();
     expect(h.backupManager.dropped).toEqual(['foo']);
     expect(h.audit.recentFor('foo', 5).some((a) => a.action === 'delete')).toBe(true);
@@ -272,6 +345,23 @@ describe('Orchestrator.delete', () => {
     expect(caught).toMatchObject({ status: 404 });
     expect(h.supervisor.stops).toEqual([]);
     expect(h.backupManager.dropped).toEqual([]);
+  });
+});
+
+describe('Orchestrator.start', () => {
+  test('a vanished database fails the start loudly instead of coming up empty', async () => {
+    await h.orchestrator.create('foo', 'tester');
+    await h.orchestrator.stop('foo', 'tester');
+    h.postgres.existing.delete('foo');
+    const startsBefore = h.supervisor.starts.length;
+    let caught: unknown;
+    try {
+      await h.orchestrator.start('foo', 'tester');
+    } catch (e) {
+      caught = e;
+    }
+    expect((caught as Error).message).toContain('does not exist');
+    expect(h.supervisor.starts.length).toBe(startsBefore);
   });
 });
 
@@ -304,7 +394,7 @@ describe('Orchestrator.restoreRunning', () => {
         sitePort: 13300 + name.length,
         adminKey: 'k',
         instanceSecret: 's',
-        postgresSchema: 'public',
+        postgresDatabase: 'public',
         bucketPrefix: name,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -320,6 +410,9 @@ describe('Orchestrator.restoreRunning', () => {
     seed('a');
     seed('b');
     seed('c');
+    // Rows seeded straight into the repo never went through create(), so
+    // hand the postgres fake the databases they would own.
+    for (const n of ['a', 'b', 'c']) h.postgres.existing.add(n);
     // Wire the supervisor stub so the FIRST spawn throws, the rest
     // succeed. This pins down "one failing instance must not stop the
     // restoreRunning loop" — exactly the regression the review fleet

@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.3.0 (2026-08-30)
+
+### Changed
+
+- **BREAKING: every instance gets its own Postgres database.** Backends now
+  run with `-d postgres-v5` against a database named after the instance
+  (`lucky-owl-755` in `lucky_owl_755`) instead of sharing one multitenant
+  database with an `instance_name` discriminator column. The orchestrator
+  creates that database with the instance and drops it on delete, so a
+  deleted instance no longer leaves rows behind. `POSTGRES_SHARED_DB` is
+  gone from the config, and the stored `postgres_schema` column becomes
+  `postgres_database` (SQLite migration `007`).
+
+  Creating an instance whose database name is already taken on the cluster
+  is refused with `409 DATABASE_EXISTS` rather than adopting it, and
+  starting one whose database has gone missing fails loudly instead of
+  quietly coming up empty.
+
+  Convex forced this: `postgres-v5-multitenant` was removed as dead code
+  upstream ([#55981](https://github.com/get-convex/convex-backend/pull/55981),
+  last present in `precompiled-2026-08-10-c0cb7ae`), so the old mode pinned
+  this project to a May 2026 backend. **Existing deployments need a data
+  migration**, the two layouts are not interchangeable: export every
+  instance, upgrade, import. The full runbook is in
+  [docs/migrate-0.3-postgres-v5.md](docs/migrate-0.3-postgres-v5.md).
+
+- **Convex backend updated to `precompiled-2026-08-29-1733af0`** (from
+  `precompiled-2026-05-18-c3ac00a`), together with the bundled Convex
+  dashboard from the same release. The backend applies its own Postgres
+  schema migrations on first start, so an instance that has booted on
+  this image cannot be served by an older one again; restore from a
+  backup if a rollback is needed.
+- **Bundled Convex CLI updated to `1.45.0`** (from `1.36.1`), keeping the
+  CLI that drives `convex export` / `convex import` for backups and
+  restores in step with the backend it talks to.
+
+### Fixed
+
+- **Restoring from an uploaded zip works again.** The route piped the raw web
+  request body into `pipeline()`, which bun 1.3.14 tries to consume through
+  its async iterator and aborts with `TypeError: undefined is not a function`
+  before a byte reaches disk; the client saw a bare HTTP 500. The body now
+  goes through `Readable.fromWeb()`. This hit every version built against
+  that bun, 0.2.7 included. Restoring from a backup already in MinIO was
+  never affected.
+
+### Removed
+
+- **The `generate_key` build stage is gone.** The backend binary now issues
+  admin keys itself (`convex-local-backend keygen admin-key --instance-name
+… --instance-secret …`, same stdout contract), so the image no longer
+  clones the Convex repo and compiles a Rust binary at the pinned tag. That
+  drops the `rust:1` stage, the git clone and `protobuf-compiler` from the
+  build, and the second binary from the image; `GENERATE_KEY_BINARY` is
+  removed as a config knob. The FSL license copy the image ships at
+  `/convex/LICENSE.md` now comes from the release tag directly.
+
 ## 0.2.7 (2026-07-06)
 
 ### Fixed

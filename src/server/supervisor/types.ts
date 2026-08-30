@@ -15,7 +15,7 @@ export interface Instance {
   sitePort: number;
   adminKey: string;
   instanceSecret: string;
-  postgresSchema: string;
+  postgresDatabase: string;
   bucketPrefix: string;
   createdAt: number;
   updatedAt: number;

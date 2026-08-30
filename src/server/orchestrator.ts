@@ -3,7 +3,11 @@ import type { Config } from './config.ts';
 import type { Logger } from './logger.ts';
 import type { AuditRepo, InstanceRepo, ResourceSampleRepo } from './db/repos.ts';
 import type { PortAllocator } from './ports.ts';
-import type { PostgresStorage } from './storage/postgres.ts';
+import {
+  DatabaseExistsError,
+  DatabaseMissingError,
+  type PostgresStorage,
+} from './storage/postgres.ts';
 import type { MinioStorage } from './storage/minio.ts';
 import { generateAdminKey } from './storage/admin-key.ts';
 import type { Supervisor } from './supervisor/supervisor.ts';
@@ -76,39 +80,66 @@ export class Orchestrator {
     this.deps.logger.info({ name }, 'creating instance');
     const genKey = this.deps.generateAdminKey ?? generateAdminKey;
     const adminKey = await genKey(
-      { binaryPath: this.deps.config.GENERATE_KEY_BINARY },
+      { binaryPath: this.deps.config.CONVEX_BINARY },
       name,
       instanceSecret,
     );
 
-    // Postgres in multitenant mode: nothing per-instance to create. The
-    // shared db was set up at orchestrator boot; tenant rows get the
-    // instance_name column when the backend writes.
-    await this.deps.minio.createBucketsForInstance(bucketPrefix);
+    let postgresDatabase: string;
+    try {
+      postgresDatabase = await this.deps.postgres.createDatabaseForInstance(name);
+    } catch (err: unknown) {
+      if (err instanceof DatabaseExistsError) {
+        throw new OrchestratorError(
+          409,
+          'DATABASE_EXISTS',
+          `${err.message}; pick a different instance name`,
+        );
+      }
+      throw err;
+    }
 
-    const { cloud, site } = this.deps.ports.allocatePair(name);
-    const instance: Instance = {
-      name,
-      displayName,
-      status: 'creating',
-      baseDomain: this.deps.config.BASE_DOMAIN,
-      cloudPort: cloud,
-      sitePort: site,
-      adminKey,
-      instanceSecret,
-      postgresSchema: this.deps.postgres.sharedDatabaseName(),
-      bucketPrefix,
-      createdAt: now,
-      updatedAt: now,
-      lastError: null,
-      backupCron: null,
-      backupRetentionDays: null,
-      backupEnabled: null,
-      backupSuspended: false,
-      restartCron: null,
-      restartEnabled: null,
-    };
-    this.deps.instances.insert(instance);
+    // Creating the database is the one non-idempotent step (MinIO's bucket
+    // create swallows already-exists, the SQLite insert is keyed by name).
+    // If anything between here and the insert fails, drop it again: an
+    // orphaned database would answer every retry of this name with a 409.
+    let instance: Instance;
+    try {
+      await this.deps.minio.createBucketsForInstance(bucketPrefix);
+
+      const { cloud, site } = this.deps.ports.allocatePair(name);
+      instance = {
+        name,
+        displayName,
+        status: 'creating',
+        baseDomain: this.deps.config.BASE_DOMAIN,
+        cloudPort: cloud,
+        sitePort: site,
+        adminKey,
+        instanceSecret,
+        postgresDatabase,
+        bucketPrefix,
+        createdAt: now,
+        updatedAt: now,
+        lastError: null,
+        backupCron: null,
+        backupRetentionDays: null,
+        backupEnabled: null,
+        backupSuspended: false,
+        restartCron: null,
+        restartEnabled: null,
+      };
+      this.deps.instances.insert(instance);
+    } catch (err: unknown) {
+      await this.deps.postgres.dropDatabaseForInstance(name).catch((dropErr: unknown) => {
+        this.deps.logger.error(
+          { name, err: dropErr instanceof Error ? dropErr.message : String(dropErr) },
+          'failed to roll back the database of a half-created instance; drop it by hand before reusing the name',
+        );
+      });
+      this.deps.ports.release(name);
+      throw err;
+    }
     this.deps.audit.record({ at: now, actor, action: 'create', instanceName: name });
 
     try {
@@ -141,13 +172,24 @@ export class Orchestrator {
     await this.deps.supervisor.stop(name);
     this.deps.traefik.remove(name);
     await this.deps.traefik.commit();
-    await this.deps.minio.deleteBucketsForInstance(inst.bucketPrefix);
-    // NOTE: In postgres-v5-multitenant mode there's no per-instance schema to
-    // drop; tenant rows for this instance remain in the shared tables. True
-    // per-tenant purge is a Phase 2 problem (manual DELETE WHERE
-    // instance_name = ? against the internal schema). See
-    // docs/architecture.md § Design decisions worth knowing for the
-    // background.
+    // Database first, buckets second: if the drop fails, the backups are
+    // still there and the delete can be retried. The other order would take
+    // the only copy of the data with it.
+    await this.deps.postgres.dropDatabaseForInstance(name);
+    // Past the drop there is nothing left to save, so a bucket failure must
+    // not abort the delete: that would leave a listed instance whose
+    // database is gone, and every start would answer "restore from a backup"
+    // for an instance the operator was deleting. Log the leftovers instead.
+    await this.deps.minio.deleteBucketsForInstance(inst.bucketPrefix).catch((err: unknown) => {
+      this.deps.logger.error(
+        {
+          name,
+          bucketPrefix: inst.bucketPrefix,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        'instance deleted but its MinIO buckets remain; remove them by hand',
+      );
+    });
     this.deps.ports.release(name);
     this.deps.instances.delete(name);
     // Purge backup-scheduler state so a same-name recreate gets a fresh
@@ -255,6 +297,29 @@ export class Orchestrator {
   }
 
   private async spawnAndRoute(instance: Instance): Promise<void> {
+    // A missing database here is data loss, not something to paper over by
+    // creating an empty one: refuse to start and let the operator restore.
+    try {
+      await this.deps.postgres.assertDatabaseForInstance(instance.name);
+    } catch (err: unknown) {
+      if (err instanceof DatabaseMissingError) {
+        throw new OrchestratorError(
+          409,
+          'DATABASE_MISSING',
+          `${err.message}; restore this instance from a backup instead of starting it empty`,
+        );
+      }
+      // The probe itself failed (admin pool unreachable, auth, timeout).
+      // That must not be worse than not probing at all: the scheduled
+      // restart and the boot replay both run unattended, and refusing here
+      // would leave the instance down behind a log line. Spawn anyway; if
+      // the cluster really is gone the backend exits at once and the
+      // supervisor's backoff owns the retry.
+      this.deps.logger.warn(
+        { name: instance.name, err: err instanceof Error ? err.message : String(err) },
+        'could not verify the instance database, spawning anyway',
+      );
+    }
     await this.deps.supervisor.start(instance);
     this.deps.traefik.set({
       instanceName: instance.name,

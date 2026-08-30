@@ -26,7 +26,7 @@ function instance(overrides: Partial<Instance> = {}): Instance {
     sitePort: 13211,
     adminKey: 'k',
     instanceSecret: 's',
-    postgresSchema: 'public',
+    postgresDatabase: 'public',
     bucketPrefix: 'inst-a',
     createdAt: 0,
     updatedAt: 0,

@@ -81,8 +81,8 @@
       <h1>One container, N self-hosted Convex backends, one dashboard</h1>
       <p class="subtitle">
         The orchestrator supervises one convex-backend process per instance and writes the Traefik
-        file-provider routing. Backends share Postgres (postgres-v5-multitenant) and MinIO with
-        per-instance bucket prefixes. The bundled Convex dashboard receives credentials via
+        file-provider routing. Backends share a Postgres cluster (postgres-v5, one database each) and MinIO
+        with per-instance bucket prefixes. The bundled Convex dashboard receives credentials via
         postMessage, no separate container needed.
       </p>
 
@@ -275,7 +275,7 @@
         <text x="978" y="190" fill="#0b0d0b" font-size="12" font-weight="600"
               font-family="'Geist', sans-serif" text-anchor="middle">Postgres</text>
         <text x="978" y="206" fill="#65655c" font-size="9"
-              font-family="'Geist Mono', monospace" text-anchor="middle">shared, multitenant</text>
+              font-family="'Geist Mono', monospace" text-anchor="middle">one db per instance</text>
 
         <!-- MinIO (external store) -->
         <rect x="908" y="264" width="140" height="72" rx="6" fill="#f5f4ed" />

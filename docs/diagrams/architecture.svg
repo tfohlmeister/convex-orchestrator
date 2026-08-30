@@ -116,7 +116,7 @@
   <rect x="916" y="154" width="52" height="12" rx="2" fill="transparent" stroke="rgba(82,83,78,0.40)" stroke-width="0.8"/>
   <text x="942" y="163" fill="rgba(82,83,78,0.90)" font-size="7" font-family="ui-monospace, monospace" text-anchor="middle" letter-spacing="0.10em">STORE</text>
   <text x="978" y="190" fill="#0b0d0b" font-size="12" font-weight="600" text-anchor="middle">Postgres</text>
-  <text x="978" y="206" fill="#65655c" font-size="9" font-family="ui-monospace, monospace" text-anchor="middle">shared, multitenant</text>
+  <text x="978" y="206" fill="#65655c" font-size="9" font-family="ui-monospace, monospace" text-anchor="middle">one db per instance</text>
 
   <!-- MinIO -->
   <rect x="908" y="264" width="140" height="72" rx="6" fill="#f5f4ed"/>

@@ -110,7 +110,6 @@ jobs:
             -e ORCHESTRATOR_ADMIN_TOKEN=$(openssl rand -hex 32) \
             -e POSTGRES_CLUSTER_URL=postgres://convex:ci-pw@pg:5432 \
             -e POSTGRES_ADMIN_URL=postgres://convex:ci-pw@pg:5432/postgres \
-            -e POSTGRES_SHARED_DB=convex_tenants \
             -e S3_ENDPOINT=http://minio:9000 \
             -e S3_REGION=us-east-1 \
             -e S3_ACCESS_KEY=minioadmin \

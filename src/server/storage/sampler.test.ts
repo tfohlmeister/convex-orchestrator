@@ -15,7 +15,7 @@ function fakeInstance(name: string): Instance {
     sitePort: 2,
     adminKey: 'k',
     instanceSecret: 's',
-    postgresSchema: 'p',
+    postgresDatabase: 'p',
     bucketPrefix: name,
     createdAt: 0,
     updatedAt: 0,

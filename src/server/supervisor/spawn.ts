@@ -8,14 +8,15 @@ export interface SpawnHandle {
   stderrLog: RotatingLog;
 }
 
-// Verified against the real backend on 2026-05-26. See
+// Verified against the real backend on 2026-08-30. See
 // docs/architecture.md § Design decisions worth knowing for the
 // env-vars-not-flags contract. Key points:
-//   - postgres URL is the positional DB_SPEC, not POSTGRES_URL env.
-//   - postgres-v5-multitenant is required for multi-tenant operation on a
-//     shared cluster; postgres-v5 hardcodes the db name to "carnitas".
+//   - postgres URL is the positional DB_SPEC, not POSTGRES_URL env. It must
+//     carry no db name: postgres-v5 appends the one it derives from
+//     --instance-name (dashes to underscores) and rejects a URL with a path.
+//   - the database has to exist already; the backend does not create it.
 //   - --instance-name, --instance-secret, --do-not-require-ssl must be CLI
-//     flags in multitenant mode; env vars are ignored.
+//     flags; env vars are ignored.
 //   - S3 settings, origins, AWS creds, RUST_LOG, DISABLE_BEACON come via env.
 export async function spawnConvex(cfg: SpawnConfig): Promise<SpawnHandle> {
   const paths = logPaths(cfg.logDir, cfg.instance.name);
@@ -53,7 +54,7 @@ export async function spawnConvex(cfg: SpawnConfig): Promise<SpawnHandle> {
     cfg.binaryPath,
     cfg.databaseUrl,
     '-d',
-    'postgres-v5-multitenant',
+    'postgres-v5',
     '-p',
     String(cfg.instance.cloudPort),
     '--site-proxy-port',

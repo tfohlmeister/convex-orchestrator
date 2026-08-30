@@ -20,8 +20,8 @@ One Hono process inside one container does five things:
   `providers.file.watch=true` never sees a partial file. Per-instance cloud and site routers are
   added or removed in place, no Traefik restart.
 - **Talks to Postgres and MinIO** for shared storage. Each backend's `convex-backend` is launched
-  with `-d postgres-v5-multitenant` and S3 env vars pointing at MinIO with a per-instance
-  bucket prefix.
+  with `-d postgres-v5` against its own database on the shared cluster, and S3 env vars pointing
+  at MinIO with a per-instance bucket prefix.
 
 Standalone editorial-styled version of this diagram lives at
 [`diagrams/architecture.html`](./diagrams/architecture.html).
@@ -97,11 +97,11 @@ to retry or roll forward.
 
 ## Storage layout
 
-- **Postgres** (shared): one cluster, one shared multitenant database (`POSTGRES_SHARED_DB`;
-  the code default is `convex`, the compose files set `convex_tenants`). Backends run with `-d postgres-v5-multitenant` and pass their
-  instance name + secret; rows carry an `instance_name` discriminator column inside the shared
-  tables. Per-tenant purge on delete is a Phase 2 problem; for now tenant rows linger after
-  `DELETE` (see `Orchestrator.delete` in `src/server/orchestrator.ts`).
+- **Postgres** (shared cluster, one database per instance): backends run with `-d postgres-v5`
+  and get the database named after their instance (dashes replaced by underscores, so
+  `lucky-owl-755` lives in `lucky_owl_755`). The orchestrator creates that database when the
+  instance is created and drops it on delete, so nothing lingers. Starting an instance only
+  checks that its database is there and refuses to boot otherwise.
 - **MinIO / S3** (shared): five buckets per instance, named
   `<instance>-{exports,snapshot-imports,modules,files,search}`, plus one
   `<instance>-backups` bucket the orchestrator uses for its own backup zips.
@@ -160,17 +160,27 @@ container. See `collectInstanceHealth` in `src/server/api/routes.ts`.
 A few load-bearing findings from the original Phase 0 spike, kept here because the code shape only
 makes sense in their context:
 
-**`-d postgres-v5-multitenant` is required for shared Postgres.** Convex's documented
-`postgres-v5` mode hardcodes the database name to `carnitas` and rejects URLs that already
-contain one. That means two single-tenant Convex backends cannot share a Postgres cluster, the
-whole "many tenants on one Postgres" value proposition would be impossible. `postgres-v5-multitenant`
-is listed in the CLI help but not in Convex's public docs; it accepts a URL with a real database
-name, requires `--instance-name` + `--instance-secret` as CLI flags (env vars are not enough in
-this mode), and stores rows in shared system tables (`documents`, `indexes`, `leases`,
-`persistence_globals`, `read_only`) with an `instance_name` discriminator column. The orchestrator
-hard-codes this mode in `src/server/supervisor/spawn.ts`. Per-tenant purge on delete is a Phase 2
-problem; for now `DELETE` leaves tenant rows behind in the shared tables (see
-`Orchestrator.delete` in `src/server/orchestrator.ts`).
+**`-d postgres-v5` with one database per instance is what makes a shared cluster work.** The
+backend derives its database name from `--instance-name` (dashes to underscores) and appends it to
+the positional `DB_SPEC`, so the URL handed to it must carry no path of its own. It does not create
+that database: it exits with `FATAL: database "…" does not exist`. The orchestrator creates it in
+`Orchestrator.create` only. Every spawn then calls `assertDatabaseForInstance`, which refuses to
+start an instance whose database has gone missing rather than creating a fresh empty one, because
+an instance that silently comes up empty looks healthy while its backups roll over the good ones.
+Delete drops the database, so an instance leaves nothing behind.
+
+The database is created by the `POSTGRES_ADMIN_URL` role and used by the `POSTGRES_CLUSTER_URL`
+role. Since Postgres 15, `PUBLIC` no longer has `CREATE` on the `public` schema, so those two must
+be the same role, or the admin one has to hand ownership over; otherwise the backend cannot create
+its tables in a database it did not create.
+
+This replaced `postgres-v5-multitenant` (one shared database, an `instance_name` discriminator
+column in shared tables) in 0.3.0. That mode was chosen back when `postgres-v5` still hardcoded the
+database name to `carnitas`, which would have made a shared cluster impossible. Both facts have
+since flipped: `postgres-v5` learned to derive the name per deployment, and Convex removed
+`postgres-v5-multitenant` as dead code in
+[#55981](https://github.com/get-convex/convex-backend/pull/55981) (first missing from
+`precompiled-2026-08-11-1f851c0`), which pinned this project to a May backend until the switch.
 
 **The Convex backend is configured by env vars, not CLI flags, for almost everything.**
 `run_backend.sh` in the official image is the real contract: `POSTGRES_URL` (positional `DB_SPEC`
@@ -178,16 +188,15 @@ inside the script), `CONVEX_CLOUD_ORIGIN` / `CONVEX_SITE_ORIGIN` (not `*_URL`),
 `S3_STORAGE_{EXPORTS,SNAPSHOT_IMPORTS,MODULES,FILES,SEARCH}_BUCKET` (five env vars, full bucket
 names, no flag prefix), `AWS_*` for S3 creds, `DISABLE_BEACON` for telemetry. The exceptions are
 CLI flags: `-p`, `--site-proxy-port`, `-i`, `-d`, `--s3-storage`, plus `--instance-name`,
-`--instance-secret`, and `--do-not-require-ssl` (env vars are not enough for the multitenant
+`--instance-secret`, and `--do-not-require-ssl` (env vars are not enough for the instance
 identity, see the previous paragraph). See `src/server/supervisor/spawn.ts` for the canonical
 invocation.
 
-**`generate_key` is built from source, not pulled from a release.** The release zip contains only
-`convex-local-backend`. The `generate_key` source (FSL-1.1-Apache-2.0, covered by the license copy the image ships
-at `/convex/LICENSE.md`, see `NOTICE`) is a 60-line clap wrapper around `KeyBroker::issue_admin_key`. The Dockerfile builds
-it from the same git tag pinned by `CONVEX_VERSION` so the binary cannot drift from the backend.
-A key generated this way is accepted by the running backend with HTTP 200, verified end-to-end
-against a real deployment.
+**Admin keys come from the backend binary itself.** `convex-local-backend keygen admin-key
+--instance-name <name> --instance-secret <hex>` prints the key on stdout and nothing on stderr, so
+the image needs no second binary and no Rust toolchain in the build. Key and backend can therefore
+never drift apart. A key generated this way is accepted by the running backend with HTTP 200,
+verified end-to-end against a real deployment.
 
 **The dashboard switcher is replaced by orchestrator-driven postMessage credentials.** Convex's
 official dashboard image expects `NEXT_PUBLIC_DEFAULT_LIST_DEPLOYMENTS_API_PORT` and fetches

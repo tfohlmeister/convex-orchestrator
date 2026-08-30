@@ -14,12 +14,12 @@ services:
       BASE_DOMAIN: ${BASE_DOMAIN}
       ORCHESTRATOR_MASTER_KEY: ${ORCHESTRATOR_MASTER_KEY}
       ORCHESTRATOR_ADMIN_TOKEN: ${ORCHESTRATOR_ADMIN_TOKEN}
-      # Cluster URL has NO db name path; orchestrator appends POSTGRES_SHARED_DB
-      # per backend spawn. See docs/architecture.md § Design decisions worth
-      # knowing for why postgres-v5-multitenant is required.
+      # Cluster URL has NO db name path: each backend appends the database
+      # named after its instance. The admin URL is what the orchestrator uses
+      # to create and drop those databases. See docs/architecture.md
+      # § Design decisions worth knowing.
       POSTGRES_CLUSTER_URL: postgres://convex:${POSTGRES_PASSWORD}@postgres:5432
       POSTGRES_ADMIN_URL: postgres://convex:${POSTGRES_PASSWORD}@postgres:5432/postgres
-      POSTGRES_SHARED_DB: convex_tenants
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}

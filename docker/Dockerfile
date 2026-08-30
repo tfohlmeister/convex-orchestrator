@@ -1,16 +1,14 @@
 # syntax=docker/dockerfile:1.7
 
 # The Convex backend binary comes from the official GitHub release zip,
-# verified by sha256 per architecture. The `generate_key` binary is built from
-# the same git tag (FSL-1.1-Apache-2.0, building locally is permitted): a
-# 60-line clap wrapper around `KeyBroker::issue_admin_key`. Build takes ~90s
-# native, longer under qemu cross-compile. See
-# docs/architecture.md § Design decisions worth knowing.
-ARG CONVEX_VERSION=precompiled-2026-05-18-c3ac00a
-ARG CONVEX_AMD64_SHA256=2a551877337c80339b746589edc7f2ade22c613160b828e6afcf93294458b430
-ARG CONVEX_ARM64_SHA256=9f831789ad36a5e1e0f73fb54a626e0bbf7c8aff55250b7e74ee278370c49518
+# verified by sha256 per architecture. It also issues admin keys, via its
+# `keygen admin-key` subcommand, so the image needs no second binary for
+# that. See docs/architecture.md § Design decisions worth knowing.
+ARG CONVEX_VERSION=precompiled-2026-08-29-1733af0
+ARG CONVEX_AMD64_SHA256=5da37e958046b9d4cc822600b2cc26582067f75f31002e0052d03e7b03a0bd47
+ARG CONVEX_ARM64_SHA256=77fad37ca7d6ba85fdff0081a72184b43811677f1cff73a6bde89b3ddd5d543b
 # dashboard.zip is platform-independent (static HTML/JS), one sha256 for all archs.
-ARG CONVEX_DASHBOARD_SHA256=cb730167425cffc69aecc7a0d1708067726734b213f5832b0d94bf22ded16380
+ARG CONVEX_DASHBOARD_SHA256=4dd29004172ca99db3ca1e17617ad4c3040eb0183093af97b06f9c51d2b765f5
 
 # ---------- Stage 1: web build ----------
 FROM oven/bun:1.3 AS web-build
@@ -61,6 +59,12 @@ RUN set -eux; \
     fi; \
     unzip convex.zip; \
     install -D -m 0755 convex-local-backend /out/convex-local-backend
+# FSL requires redistributions to include a copy of the license terms. One
+# copy covers both bundled Convex artifacts (backend binary, dashboard static
+# export) since they come from the same release tag.
+RUN curl --fail --silent --show-error --location \
+      --output /out/LICENSE.md \
+      "https://raw.githubusercontent.com/get-convex/convex-backend/${CONVEX_VERSION}/LICENSE.md"
 
 # ---------- Stage 3b: fetch dashboard static export ----------
 # Convex publishes the dashboard as a pre-built static export (~3 MB zip) on
@@ -89,25 +93,7 @@ RUN set -eux; \
     unzip -q dashboard.zip -d /out
 
 
-# ---------- Stage 4: build generate_key from source ----------
-# Use rust:1 (Debian-based) since it ships rustup, which honors the repo's
-# `rust-toolchain.toml` pin (currently nightly-2026-02-18) automatically.
-FROM rust:1 AS convex-genkey
-ARG CONVEX_VERSION
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      git protobuf-compiler \
-    && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-RUN git clone --depth 1 --branch "${CONVEX_VERSION}" \
-      https://github.com/get-convex/convex-backend.git .
-RUN cargo build --release -p keybroker --bin generate_key \
-    && install -m 0755 target/release/generate_key /generate_key
-# FSL requires redistributions to include a copy of the license terms.
-# One copy covers all three bundled artifacts (backend binary,
-# generate_key, dashboard export) since they come from the same tag.
-RUN install -m 0644 LICENSE.md /convex-backend-LICENSE.md
-
-# ---------- Stage 5: runtime ----------
+# ---------- Stage 4: runtime ----------
 FROM oven/bun:1.3-slim AS runtime
 # `convex` is the official npm CLI used by the backup scheduler for
 # `convex export` / `convex import` against each instance. Pinned via Renovate
@@ -117,9 +103,9 @@ FROM oven/bun:1.3-slim AS runtime
 # CONVEX_SELF_HOSTED_ADMIN_KEY without falling through to its interactive
 # login prompt (the 1.18 build attempts to prompt and dies with
 # "Cannot prompt for input in non-interactive terminals" when called for
-# pre-restore backups). 1.36.1 is the version we've manually verified
+# pre-restore backups). 1.45.0 is the version we've manually verified
 # against a real instance end-to-end.
-ARG CONVEX_CLI_VERSION=1.36.1
+ARG CONVEX_CLI_VERSION=1.45.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl tini libpq5 nodejs npm \
     && npm install -g --no-fund --no-audit "convex@${CONVEX_CLI_VERSION}" \
@@ -132,14 +118,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 # Non-root user provided by oven/bun base image (uid 1000). Copies use it
-# directly so the bun process can read the binaries + execute the convex
-# local backend + generate_key wrappers without sudo.
+# directly so the bun process can read and execute the convex local backend
+# without sudo.
 COPY --from=convex-backend-bin --chown=bun:bun /out/convex-local-backend /convex/convex-local-backend
-COPY --from=convex-genkey --chown=bun:bun /generate_key /convex/generate_key
 # License terms for the FSL-licensed Convex components bundled in this image
-# (backend binary, generate_key, dashboard static export). See NOTICE in the
-# repo root.
-COPY --from=convex-genkey --chown=bun:bun /convex-backend-LICENSE.md /convex/LICENSE.md
+# (backend binary, dashboard static export). See NOTICE in the repo root.
+COPY --from=convex-backend-bin --chown=bun:bun /out/LICENSE.md /convex/LICENSE.md
 COPY --from=server-build --chown=bun:bun /app/dist/server ./dist/server
 COPY --from=web-build --chown=bun:bun /app/dist/web ./dist/web
 COPY --from=convex-dashboard --chown=bun:bun /out ./dist/dashboard
@@ -158,7 +142,6 @@ ENV HTTP_PORT=8080 \
     DATA_DIR=/var/lib/orchestrator \
     LOG_DIR=/var/log/convex \
     CONVEX_BINARY=/convex/convex-local-backend \
-    GENERATE_KEY_BINARY=/convex/generate_key \
     CONVEX_CLI=convex \
     BACKUP_WORK_DIR=/var/lib/orchestrator/backup-work \
     CONVEX_CLI_CWD=/convex-cli-cwd

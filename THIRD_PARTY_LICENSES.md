@@ -11,7 +11,6 @@ Copyright Convex, Inc., licensed
 | Component               | Source                                           |
 | ----------------------- | ------------------------------------------------ |
 | `convex-local-backend`  | official release binary (sha256-pinned)          |
-| `generate_key`          | built from source at the same release tag        |
 | dashboard static export | official release `dashboard.zip` (sha256-pinned) |
 
 The `convex` npm CLI installed in the image is plain

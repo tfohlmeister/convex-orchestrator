@@ -24,7 +24,6 @@ const envSchema = z.object({
   DATA_DIR: z.string().default('/var/lib/orchestrator'),
   LOG_DIR: z.string().default('/var/log/convex'),
   CONVEX_BINARY: z.string().default('/convex/convex-local-backend'),
-  GENERATE_KEY_BINARY: z.string().default('/convex/generate_key'),
   TRAEFIK_DYNAMIC_PATH: z.string().default('/etc/traefik/dynamic/orchestrator.yml'),
   // When false the orchestrator does NOT write self.yml (the routers that
   // expose orchestrator.<base> and dashboard.<base>). Use this for co-hosted
@@ -51,19 +50,16 @@ const envSchema = z.object({
   CONVEX_BIND_ADDRESS: z.string().default('127.0.0.1'),
   TRAEFIK_AUTH_MIDDLEWARES: z.string().optional(),
   // Cluster URL WITHOUT a db name path: e.g. postgres://convex:pw@postgres:5432
-  // The orchestrator appends the shared multitenant db name when spawning each
-  // backend. See docs/architecture.md § Design decisions worth knowing for
-  // why postgres-v5-multitenant is the only path that supports a shared
-  // cluster.
+  // Each backend gets its own database on this cluster, named after the
+  // instance. See docs/architecture.md § Design decisions worth knowing.
   POSTGRES_CLUSTER_URL: z.string().url(),
-  // Admin URL used to create the shared database if absent. Should target the
-  // postgres maintenance db: e.g. postgres://convex:pw@postgres:5432/postgres
+  // Admin URL used to create and drop those per-instance databases. Should
+  // target the postgres maintenance db: e.g.
+  // postgres://convex:pw@postgres:5432/postgres
+  // Use the same role as POSTGRES_CLUSTER_URL. Since Postgres 15 a database
+  // created by one role is not writable by another without an explicit
+  // ownership handover, and the backend would fail to create its tables.
   POSTGRES_ADMIN_URL: z.string().url(),
-  // Shared multitenant database name; created on boot if missing.
-  POSTGRES_SHARED_DB: z
-    .string()
-    .regex(/^[a-z][a-z0-9_]*$/)
-    .default('convex'),
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().default('us-east-1'),
   S3_ACCESS_KEY: z.string().min(1),

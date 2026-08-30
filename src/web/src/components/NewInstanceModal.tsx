@@ -9,7 +9,15 @@ interface Props {
 
 const NAME_RE = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/;
 
-const STEPS = ['Validating', 'Schema', 'Buckets', 'AdminKey', 'Spawn', 'Routes', 'Ready'] as const;
+const STEPS = [
+  'Validating',
+  'Database',
+  'Buckets',
+  'AdminKey',
+  'Spawn',
+  'Routes',
+  'Ready',
+] as const;
 
 // Convex-SaaS-style instance name generator: <adjective>-<animal>-<3-digit>.
 // Combined space is ~30 * 30 * 900 = ~810k names, which is plenty for the

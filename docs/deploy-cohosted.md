@@ -162,6 +162,6 @@ for external monitoring.
 - **Postgres version pin.** Postgres 16 is the default in the base
   compose file. If the host's existing services use a different
   Postgres major and you're tempted to share a single instance: don't.
-  `postgres-v5-multitenant` (the mode the supervised Convex backends
-  run in) has specific schema expectations, and version coupling
-  across unrelated workloads tends to bite later.
+  The supervised Convex backends own a database each and manage their
+  own schema in it, and version coupling across unrelated workloads
+  tends to bite later.

@@ -11,7 +11,7 @@ interface InstanceRow {
   site_port: number;
   admin_key_enc: Buffer;
   instance_secret_enc: Buffer;
-  postgres_schema: string;
+  postgres_database: string;
   bucket_prefix: string;
   created_at: number;
   updated_at: number;
@@ -36,7 +36,7 @@ export class InstanceRepo {
         `INSERT INTO instances (
           name, display_name, status, base_domain, cloud_port, site_port,
           admin_key_enc, instance_secret_enc,
-          postgres_schema, bucket_prefix,
+          postgres_database, bucket_prefix,
           created_at, updated_at, last_error,
           backup_cron, backup_retention_days, backup_enabled, backup_suspended,
           restart_cron, restart_enabled
@@ -51,7 +51,7 @@ export class InstanceRepo {
         instance.sitePort,
         encrypt(instance.adminKey, this.masterKey),
         encrypt(instance.instanceSecret, this.masterKey),
-        instance.postgresSchema,
+        instance.postgresDatabase,
         instance.bucketPrefix,
         instance.createdAt,
         instance.updatedAt,
@@ -171,7 +171,7 @@ export class InstanceRepo {
       sitePort: row.site_port,
       adminKey: decrypt(row.admin_key_enc, this.masterKey),
       instanceSecret: decrypt(row.instance_secret_enc, this.masterKey),
-      postgresSchema: row.postgres_schema,
+      postgresDatabase: row.postgres_database,
       bucketPrefix: row.bucket_prefix,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

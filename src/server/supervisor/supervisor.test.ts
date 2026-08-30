@@ -16,7 +16,7 @@ function makeInstance(name = 'inst-a'): Instance {
     sitePort: 13211,
     adminKey: 'k',
     instanceSecret: 's',
-    postgresSchema: 'public',
+    postgresDatabase: 'public',
     bucketPrefix: name,
     createdAt: Date.now(),
     updatedAt: Date.now(),

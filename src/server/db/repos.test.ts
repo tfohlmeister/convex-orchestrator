@@ -29,7 +29,7 @@ function fullInstance(name: string): Instance {
     sitePort: 13211,
     adminKey: 'admin-key',
     instanceSecret: 'instance-secret',
-    postgresSchema: 'public',
+    postgresDatabase: 'public',
     bucketPrefix: name,
     createdAt: now,
     updatedAt: now,
@@ -50,7 +50,7 @@ function seedInstance(name: string): void {
   db.prepare(
     `INSERT INTO instances (
       name, status, base_domain, cloud_port, site_port,
-      admin_key_enc, instance_secret_enc, postgres_schema, bucket_prefix,
+      admin_key_enc, instance_secret_enc, postgres_database, bucket_prefix,
       created_at, updated_at
     ) VALUES (?, 'running', 'test.local', 13210, 13211,
               X'00', X'00', 'public', ?, ?, ?)`,

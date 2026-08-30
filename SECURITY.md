@@ -70,14 +70,11 @@ worth understanding when evaluating its security posture:
 
 ## Known limitations vs. a hardened multi-tenant setup
 
-- **Postgres tenant rows linger after delete.** `postgres-v5-multitenant`
-  uses an `instance_name` discriminator inside shared tables. The
-  orchestrator's delete path removes the orchestrator-side instance row,
-  buckets, and Traefik routes, but does not currently purge per-tenant
-  rows from the shared Convex tables (`documents`, `indexes`, `leases`,
-  `persistence_globals`, `read_only`). This is a Phase 2 item. Not a
-  confidentiality issue (the rows are unreachable without that tenant's
-  secret), but a storage-bloat one.
+- **Deleting an instance drops its Postgres database.** Each instance owns
+  one database on the shared cluster, and `DELETE` removes it with
+  `DROP DATABASE … WITH (FORCE)` alongside the MinIO buckets. That leaves
+  nothing behind, but it also means a delete is unrecoverable from the
+  cluster itself: the backups in MinIO are the only way back.
 - **No per-instance resource quotas.** The supervisor samples CPU and
   RSS but does not enforce limits. A runaway tenant can starve the
   host. Use Docker's per-container limits or systemd slice limits

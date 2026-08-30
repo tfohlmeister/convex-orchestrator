@@ -18,9 +18,9 @@ from one editorial web UI with the official Convex dashboard embedded per-instan
 - **One Convex dashboard for the whole fleet**: the bundled dashboard static export is served from
   the same Hono process via host-header routing; credentials are handed to the iframe over
   `postMessage` so the operator never logs in per instance.
-- **Shared Postgres (multitenant) + MinIO (per-instance bucket prefix)**: keeps the resource
-  footprint flat and lets `convex export`/`convex import` run against any backend without re-
-  provisioning storage.
+- **Shared Postgres (a database per instance) + MinIO (per-instance bucket prefix)**: keeps the
+  resource footprint flat and lets `convex export`/`convex import` run against any backend without
+  re-provisioning storage.
 - **Scheduled backups + restore, both via Convex's own zip format**: per-instance cron, retention,
   stuck-export detection, force-restart-backend escape hatch. Restore takes a `pre-restore` backup
   first so every destructive flow has a rollback point. Restore jobs persist to SQLite and survive
@@ -39,8 +39,8 @@ from one editorial web UI with the official Convex dashboard embedded per-instan
 The orchestrator is one Hono process that supervises N `convex-backend` child processes inside a
 single container, writes a Traefik file-provider config for per-instance host routing, and
 serves both its own React UI and the bundled Convex dashboard from the same port. Backends share a
-Postgres cluster in `postgres-v5-multitenant` mode and a MinIO bucket layout with per-instance
-prefixes. The bundled dashboard receives credentials via `postMessage` from the orchestrator UI,
+Postgres cluster in `postgres-v5` mode, one database each, plus a MinIO bucket layout with
+per-instance prefixes. The bundled dashboard receives credentials via `postMessage` from the orchestrator UI,
 so the operator never types an admin key per instance.
 
 Standalone editorial-styled diagrams are in [`docs/diagrams/`](docs/diagrams/); a deeper component
@@ -65,15 +65,20 @@ Open `https://orchestrator.<BASE_DOMAIN>` and create your first instance. Click 
 any row to land in the official Convex dashboard, embedded and auto-authenticated for that
 instance.
 
-Pin a specific release for repeatable deploys by setting `ORCHESTRATOR_VERSION=0.2.7` in `.env`;
+Pin a specific release for repeatable deploys by setting `ORCHESTRATOR_VERSION=0.3.0` in `.env`;
 unset means `latest`.
 
 ### Upgrading
 
 `docker compose pull && docker compose up -d` moves you to the newest release when
 `ORCHESTRATOR_VERSION` is unset. Skim the [CHANGELOG](./CHANGELOG.md) before upgrading across
-minor versions. One upgrade needs manual action:
+minor versions. Two upgrades need manual action:
 
+- **0.2.x → 0.3.0**: every instance moves from the shared multitenant database to its own
+  database, which is a data migration, not a restart. Do **not** just pull and up: the backends
+  would come up on fresh empty databases, report themselves healthy, and leave the real data
+  behind in the old shared one. Follow
+  [docs/migrate-0.3-postgres-v5.md](./docs/migrate-0.3-postgres-v5.md) instead.
 - **0.2.2 and older → 0.2.3+**: the container now runs as a non-root user. Volumes created by
   older versions are root-owned, and the orchestrator fails on boot with
   `SQLITE_READONLY_DIRECTORY`. Fix once with the `chown` documented in the
@@ -203,8 +208,8 @@ See [`docs/architecture.md`](docs/architecture.md) for the full payload shape an
 
 - **[Architecture](./docs/architecture.md)**: component model, data flow, the four diagrams in
   one place with prose, plus the load-bearing design decisions (why
-  `postgres-v5-multitenant`, why env-vars-not-flags, why build `generate_key` from source, why
-  postMessage instead of the dashboard switcher).
+  `postgres-v5` with a database per instance, why env-vars-not-flags, why admin keys come from the backend
+  binary, why postMessage instead of the dashboard switcher).
 - **[Backups and Restore](./docs/backups.md)**: operator guide. Retention tuning,
   force-restart-backend, off-site sync, recovery playbooks.
 - **[Co-hosted deployment](./docs/deploy-cohosted.md)**: running on a host that already has a
@@ -212,8 +217,9 @@ See [`docs/architecture.md`](docs/architecture.md) for the full payload shape an
   stay public.
 
 The Dockerfile pulls the Convex backend binary from the official
-`get-convex/convex-backend` GitHub release (sha256-pinned per architecture), builds `generate_key`
-from the same git tag, and bundles the dashboard static export. No separate dashboard container
+`get-convex/convex-backend` GitHub release (sha256-pinned per architecture) and bundles the
+dashboard static export from the same tag. The backend issues its own admin keys
+(`keygen admin-key`), so there is no second binary to build. No separate dashboard container
 needed. See the License section below for what that bundling means.
 
 ## License
@@ -222,7 +228,7 @@ The code in this repository is licensed under the **Apache License 2.0** (see
 [LICENSE](./LICENSE)).
 
 The published **Docker image** additionally bundles components of Convex (the
-`convex-local-backend` binary, the `generate_key` binary, and the dashboard static export),
+`convex-local-backend` binary and the dashboard static export),
 Copyright Convex, Inc., licensed under the
 [Functional Source License, FSL-1.1-Apache-2.0](https://github.com/get-convex/convex-backend/blob/main/LICENSE.md).
 A copy of those terms ships in the image at `/convex/LICENSE.md`. The practical consequence:
