@@ -6,7 +6,7 @@
 
 - **"use node" actions run again on the 0.3.1 backend.** That backend only
   starts its local Node executor with Node 22, 24 or 26 on PATH, and the
-  image shipped Debian bookworm's Node 20: every push with a "use node"
+  image shipped the Debian trixie base's Node 20: every push with a "use node"
   module failed with `DeploymentNotConfiguredForNodeActions`, and already
   deployed Node actions could not run. The runtime now takes Node 24.22.1
   and npm from the official `node:24.22.1-bookworm-slim` image instead of
@@ -22,9 +22,9 @@
   `1.0/getSnapshotTs` syscall (`ctx.meta.getSnapshotTs()`), which
   `@convex-dev/workpool` 0.5 calls on every loop run, so its queue never
   starts any work there. As with 0.3.0, the backend migrates its Postgres
-  schema on first start, so an instance that
-  has booted on this image cannot be served by an older one again; restore
-  from a backup if a rollback is needed.
+  schema on first start, so an instance that has booted on this image cannot
+  be served by an older one again; restore from a backup if a rollback is
+  needed.
 
 ## 0.3.0 (2026-08-30)
 

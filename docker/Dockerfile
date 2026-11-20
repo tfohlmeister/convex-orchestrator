@@ -94,20 +94,23 @@ RUN set -eux; \
 
 # ---------- Stage 3c: Node.js for "use node" actions and the convex CLI ----------
 # The backend runs "use node" actions in a local Node executor and refuses
-# to start it unless Node 22, 24 or 26 is on PATH. Debian bookworm's
-# nodejs package is 20, so the runtime takes Node from the official image.
+# to start it unless Node 22, 24 or 26 is on PATH. The runtime base
+# (oven/bun:1.3-slim, Debian trixie) packages nodejs 20, so the runtime takes
+# Node from the official image; its bookworm build runs on trixie's newer glibc.
 FROM node:24.22.1-bookworm-slim AS node-runtime
 
 # ---------- Stage 4: runtime ----------
 FROM oven/bun:1.3-slim AS runtime
+# Node and npm land in /usr/local/bin, ahead of bun's node shim in
+# /usr/local/bun-node-fallback-bin on PATH.
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 # `convex` is the official npm CLI used by the backup scheduler for
 # `convex export` / `convex import` against each instance. Pinned via Renovate
-# (npm:convex). Node.js + npm are required because `npx convex` shells out
-# to node — Bun cannot run the CLI directly.
+# (npm:convex). It runs on Node, Bun cannot run the CLI directly; npm is only
+# needed here to install it.
 # Pin > 1.20 so the CLI honours CONVEX_SELF_HOSTED_URL +
 # CONVEX_SELF_HOSTED_ADMIN_KEY without falling through to its interactive
 # login prompt (the 1.18 build attempts to prompt and dies with
@@ -118,7 +121,7 @@ ARG CONVEX_CLI_VERSION=1.45.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl tini libpq5 \
     && npm install -g --no-fund --no-audit "convex@${CONVEX_CLI_VERSION}" \
-    && rm -rf /var/lib/apt/lists/* /root/.npm \
+    && rm -rf /var/lib/apt/lists/* /root/.npm /tmp/node-compile-cache \
     # `convex export` runs ensureHasConvexDependency which insists on a
     # package.json that lists `convex` as a dep — even in self-hosted
     # --url/--admin-key mode. Stub one out and spawn from this cwd.
