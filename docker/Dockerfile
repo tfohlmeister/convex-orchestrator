@@ -92,9 +92,18 @@ RUN set -eux; \
     mkdir /out; \
     unzip -q dashboard.zip -d /out
 
+# ---------- Stage 3c: Node.js for "use node" actions and the convex CLI ----------
+# The backend runs "use node" actions in a local Node executor and refuses
+# to start it unless Node 22, 24 or 26 is on PATH. Debian bookworm's
+# nodejs package is 20, so the runtime takes Node from the official image.
+FROM node:24.22.1-bookworm-slim AS node-runtime
 
 # ---------- Stage 4: runtime ----------
 FROM oven/bun:1.3-slim AS runtime
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 # `convex` is the official npm CLI used by the backup scheduler for
 # `convex export` / `convex import` against each instance. Pinned via Renovate
 # (npm:convex). Node.js + npm are required because `npx convex` shells out
@@ -107,7 +116,7 @@ FROM oven/bun:1.3-slim AS runtime
 # against a real instance end-to-end.
 ARG CONVEX_CLI_VERSION=1.45.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl tini libpq5 nodejs npm \
+      ca-certificates curl tini libpq5 \
     && npm install -g --no-fund --no-audit "convex@${CONVEX_CLI_VERSION}" \
     && rm -rf /var/lib/apt/lists/* /root/.npm \
     # `convex export` runs ensureHasConvexDependency which insists on a

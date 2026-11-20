@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2 (2026-11-20)
+
+### Fixed
+
+- **"use node" actions run again on the 0.3.1 backend.** That backend only
+  starts its local Node executor with Node 22, 24 or 26 on PATH, and the
+  image shipped Debian bookworm's Node 20: every push with a "use node"
+  module failed with `DeploymentNotConfiguredForNodeActions`, and already
+  deployed Node actions could not run. The runtime now takes Node 24.22.1
+  and npm from the official `node:24.22.1-bookworm-slim` image instead of
+  the Debian `nodejs`/`npm` packages. Do not run 0.3.1.
+
 ## 0.3.1 (2026-11-20)
 
 ### Changed
