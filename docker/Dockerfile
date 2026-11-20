@@ -4,11 +4,11 @@
 # verified by sha256 per architecture. It also issues admin keys, via its
 # `keygen admin-key` subcommand, so the image needs no second binary for
 # that. See docs/architecture.md § Design decisions worth knowing.
-ARG CONVEX_VERSION=precompiled-2026-08-29-1733af0
-ARG CONVEX_AMD64_SHA256=5da37e958046b9d4cc822600b2cc26582067f75f31002e0052d03e7b03a0bd47
-ARG CONVEX_ARM64_SHA256=77fad37ca7d6ba85fdff0081a72184b43811677f1cff73a6bde89b3ddd5d543b
+ARG CONVEX_VERSION=precompiled-2026-11-05-6ce65c1
+ARG CONVEX_AMD64_SHA256=0755ec3b163a688d8cce2a01b292e82c5e0147518ff0eaab1b5333c27584ca15
+ARG CONVEX_ARM64_SHA256=e1c677dcb2123b85058e1c5d0a12010e4324c66d3dd10ec3050e9dfda66c7be5
 # dashboard.zip is platform-independent (static HTML/JS), one sha256 for all archs.
-ARG CONVEX_DASHBOARD_SHA256=4dd29004172ca99db3ca1e17617ad4c3040eb0183093af97b06f9c51d2b765f5
+ARG CONVEX_DASHBOARD_SHA256=48073cfe4274048e43e3833c0b9019b7580963831039d28c9d715e4fb7f5400c
 
 # ---------- Stage 1: web build ----------
 FROM oven/bun:1.3 AS web-build

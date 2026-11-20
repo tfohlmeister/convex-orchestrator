@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1 (2026-11-20)
+
+### Changed
+
+- **Convex backend updated to `precompiled-2026-11-05-6ce65c1`** (from
+  `precompiled-2026-08-29-1733af0`), together with the bundled Convex
+  dashboard from the same release. The older backend lacks the
+  `1.0/getSnapshotTs` syscall (`ctx.meta.getSnapshotTs()`), which
+  `@convex-dev/workpool` 0.5 calls on every loop run, so its queue never
+  starts any work there. As with 0.3.0, the backend migrates its Postgres
+  schema on first start, so an instance that
+  has booted on this image cannot be served by an older one again; restore
+  from a backup if a rollback is needed.
+
 ## 0.3.0 (2026-08-30)
 
 ### Changed
